@@ -13,6 +13,8 @@ function mapStripeError(err) {
   };
 }
 
+// Callers must populate `account` (and, on failures, `error`) on every result
+// entry; the summary labels each failure by `account`.
 function aggregate(results) {
   const succeeded = results.filter((r) => r.ok).length;
   const failed = results.length - succeeded;

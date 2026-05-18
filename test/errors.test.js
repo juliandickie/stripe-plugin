@@ -39,3 +39,18 @@ test('aggregate ok=true only when all succeed', () => {
   assert.equal(a.ok, true);
   assert.equal(a.summary, '1 of 1 succeeded');
 });
+
+test('mapStripeError is null-safe for null and undefined input', () => {
+  const a = mapStripeError(null);
+  const b = mapStripeError(undefined);
+  assert.equal(a.type, 'Error');
+  assert.equal(b.type, 'Error');
+});
+
+test('aggregate of an empty list is the documented degenerate (ok true, 0 of 0)', () => {
+  const a = aggregate([]);
+  assert.equal(a.ok, true);
+  assert.equal(a.succeeded, 0);
+  assert.equal(a.failed, 0);
+  assert.equal(a.summary, '0 of 0 succeeded');
+});
