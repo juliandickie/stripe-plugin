@@ -47,11 +47,22 @@ async function callStripe(client, resourcePath, action, req) {
   const hasId = req.id !== undefined && req.id !== null && req.id !== '';
   let result;
   if (action === 'list' || action === 'search') {
+    if (req.limit != null) params.limit = req.limit;
     const ret = fn(params, options);
-    result = req.all ? await ret.autoPagingToArray({limit: req.limit || 10000}) : await ret;
+    result = req.all ? await ret.autoPagingToArray({limit: req.limit != null ? req.limit : 10000}) : await ret;
   } else if (hasId) {
     result = await fn(req.id, params, options);
   } else {
+    // Instance operations (retrieve/update/del/cancel/capture/...) have a
+    // fixed (id, params, options) signature on the pinned stripe-node build,
+    // so fn.length >= 3. Collection/factory ops (create) and singletons
+    // (balance.retrieve) take (params, options) with fn.length <= 2. Reaching
+    // this branch with fn.length >= 3 and no id means an instance op was
+    // invoked without --id; a malformed call would otherwise be sent. Fail
+    // loud with a clean error instead.
+    if (action !== 'create' && fn.length >= 3) {
+      throw new Error('Operation "' + resourcePath + '.' + action + '" requires --id (instance operation); none was supplied.');
+    }
     result = await fn(params, options);
   }
   return result;

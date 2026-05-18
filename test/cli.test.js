@@ -21,11 +21,30 @@ const ACCOUNTS = {
   }
 };
 
-function fakeFactory(record) {
+function fakeFactory(record, opts) {
+  const failIds = (opts && opts.failIds) || [];
   return (cfg) => ({
     customers: {
-      list: (p, o) => { record.push({apiKey: cfg.apiKey, stripeAccount: cfg.stripeAccount}); return {autoPagingToArray: async () => [{id: 'cus_1'}]}; },
-      create: async (p) => { record.push({apiKey: cfg.apiKey, stripeAccount: cfg.stripeAccount, p: p}); return {id: 'cus_new'}; }
+      // Real stripe-node arity: list(params, opts) -> .length 2.
+      list: (p, o) => { record.push({apiKey: cfg.apiKey, stripeAccount: cfg.stripeAccount, op: 'list', p: p}); return {autoPagingToArray: async () => [{id: 'cus_1'}]}; },
+      create: async (p) => { record.push({apiKey: cfg.apiKey, stripeAccount: cfg.stripeAccount, op: 'create', p: p}); return {id: 'cus_new'}; },
+      // Instance ops keep the real (id, params, opts) arity so the dispatch
+      // arity guard behaves exactly as against the live SDK.
+      del: async (id, p, o) => {
+        record.push({apiKey: cfg.apiKey, stripeAccount: cfg.stripeAccount, op: 'del', id: id});
+        if (failIds.indexOf(id) >= 0) { const e = new Error('boom for ' + id); e.code = 'resource_missing'; throw e; }
+        return {id: id, deleted: true};
+      },
+      update: async (id, p, o) => {
+        record.push({apiKey: cfg.apiKey, stripeAccount: cfg.stripeAccount, op: 'update', id: id, p: p});
+        return {id: id};
+      }
+    },
+    paymentIntents: {
+      cancel: async (id, p, o) => { record.push({apiKey: cfg.apiKey, op: 'paymentIntents.cancel', id: id}); return {id: id, status: 'canceled'}; }
+    },
+    balance: {
+      retrieve: async (p, o) => { record.push({apiKey: cfg.apiKey, op: 'balance.retrieve'}); return {object: 'balance'}; }
     }
   });
 }
@@ -142,4 +161,122 @@ test('help for an unknown resource suggests nearby and does not crash or confirm
   const r = await run(['help', 'custmoers'], {env: {}, stripeFactory: fakeFactory([])});
   assert.equal(r.exitCode, 0);
   assert.doesNotMatch(r.stdout, /CONFIRMATION REQUIRED/);
+});
+
+test('bulk del under threshold with --confirm --confirm-bulk iterates every id (fail-loud aggregate)', async () => {
+  const s = setup(ACCOUNTS);
+  const rec = [];
+  const r = await run(['customers', 'del', '--account', 'idd', '--bulk-ids', 'cus_1,cus_2,cus_3', '--confirm', '--confirm-bulk', '--accounts-file', s.regPath],
+    {env: {CLAUDE_PLUGIN_DATA: s.dir, CLAUDE_PLUGIN_OPTION_BULK_THRESHOLD: '10'}, stripeFactory: fakeFactory(rec)});
+  assert.equal(r.exitCode, 0);
+  const dels = rec.filter((x) => x.op === 'del');
+  assert.equal(dels.length, 3);
+  assert.deepEqual(dels.map((x) => x.id), ['cus_1', 'cus_2', 'cus_3']);
+  const out = JSON.parse(r.stdout);
+  assert.equal(out.ok, true);
+  assert.equal(out.succeeded, 3);
+  assert.equal(out.failed, 0);
+  assert.equal(out.results.length, 3);
+});
+
+test('bulk del where one id errors -> aggregate ok:false, exit 1, other ids still attempted', async () => {
+  const s = setup(ACCOUNTS);
+  const rec = [];
+  const r = await run(['customers', 'del', '--account', 'idd', '--bulk-ids', 'cus_1,cus_BAD,cus_3', '--confirm', '--confirm-bulk', '--accounts-file', s.regPath],
+    {env: {CLAUDE_PLUGIN_DATA: s.dir}, stripeFactory: fakeFactory(rec, {failIds: ['cus_BAD']})});
+  assert.equal(r.exitCode, 1);
+  const dels = rec.filter((x) => x.op === 'del');
+  assert.deepEqual(dels.map((x) => x.id), ['cus_1', 'cus_BAD', 'cus_3']);
+  const out = JSON.parse(r.stdout);
+  assert.equal(out.ok, false);
+  assert.equal(out.succeeded, 2);
+  assert.equal(out.failed, 1);
+  assert.match(out.summary, /cus_BAD failed:/);
+});
+
+test('bulk over threshold without --confirm-bulk still returns scope review (exit 11), no calls', async () => {
+  const s = setup(ACCOUNTS);
+  const rec = [];
+  const ids = Array.from({length: 12}, (_, i) => 'cus_' + i).join(',');
+  const r = await run(['customers', 'del', '--account', 'idd', '--bulk-ids', ids, '--confirm', '--accounts-file', s.regPath],
+    {env: {CLAUDE_PLUGIN_DATA: s.dir, CLAUDE_PLUGIN_OPTION_BULK_THRESHOLD: '10'}, stripeFactory: fakeFactory(rec)});
+  assert.equal(r.exitCode, 11);
+  const out = JSON.parse(r.stdout);
+  assert.equal(out.kind, 'scope_review_required');
+  assert.equal(out.count, 12);
+  assert.equal(rec.length, 0);
+});
+
+test('bulk without --confirm -> CONFIRMATION REQUIRED preview, exit 10, no calls, mentions N targets', async () => {
+  const s = setup(ACCOUNTS);
+  const rec = [];
+  const r = await run(['customers', 'del', '--account', 'idd', '--bulk-ids', 'cus_1,cus_2,cus_3', '--confirm-bulk', '--accounts-file', s.regPath],
+    {env: {CLAUDE_PLUGIN_DATA: s.dir}, stripeFactory: fakeFactory(rec)});
+  assert.equal(r.exitCode, 10);
+  assert.match(r.stdout, /CONFIRMATION REQUIRED/);
+  assert.match(r.stdout, /bulk: 3 targets/);
+  assert.match(r.stdout, /targets: cus_1,cus_2,cus_3/);
+  assert.match(r.stdout, /class: destructive/);
+  assert.equal(rec.length, 0);
+});
+
+test('preview shows target id for an instance update (no --confirm)', async () => {
+  const s = setup(ACCOUNTS);
+  const rec = [];
+  const r = await run(['customers', 'update', '--id', 'cus_9', '--account', 'idd', '--data', 'name=X', '--accounts-file', s.regPath],
+    {env: {CLAUDE_PLUGIN_DATA: s.dir}, stripeFactory: fakeFactory(rec)});
+  assert.equal(r.exitCode, 10);
+  assert.match(r.stdout, /target id: cus_9/);
+  assert.equal(rec.length, 0);
+});
+
+test('preview shows target id (none) for a no-id mutating create', async () => {
+  const s = setup(ACCOUNTS);
+  const rec = [];
+  const r = await run(['customers', 'create', '--account', 'idd', '--data', 'email=a@b.co', '--accounts-file', s.regPath],
+    {env: {CLAUDE_PLUGIN_DATA: s.dir}, stripeFactory: fakeFactory(rec)});
+  assert.equal(r.exitCode, 10);
+  assert.match(r.stdout, /target id: \(none\)/);
+  assert.equal(rec.length, 0);
+});
+
+test('instance op with no --id is rejected with exit 1 and the SDK method is NOT called', async () => {
+  const s = setup(ACCOUNTS);
+  const rec = [];
+  const r = await run(['paymentIntents', 'cancel', '--account', 'idd', '--confirm', '--accounts-file', s.regPath],
+    {env: {CLAUDE_PLUGIN_DATA: s.dir}, stripeFactory: fakeFactory(rec)});
+  assert.equal(r.exitCode, 1);
+  assert.match(r.stdout, /requires --id/);
+  assert.equal(rec.filter((x) => x.op === 'paymentIntents.cancel').length, 0);
+});
+
+test('singleton balance retrieve with no id still works (guard does not false-positive)', async () => {
+  const s = setup(ACCOUNTS);
+  const rec = [];
+  const r = await run(['balance', 'retrieve', '--account', 'idd', '--accounts-file', s.regPath],
+    {env: {CLAUDE_PLUGIN_DATA: s.dir}, stripeFactory: fakeFactory(rec)});
+  assert.equal(r.exitCode, 0);
+  const out = JSON.parse(r.stdout);
+  assert.equal(out.object, 'balance');
+});
+
+test('--limit on a plain (non --all) list is passed to Stripe as params.limit', async () => {
+  const s = setup(ACCOUNTS);
+  const rec = [];
+  const r = await run(['customers', 'list', '--account', 'idd', '--limit', '3', '--accounts-file', s.regPath],
+    {env: {CLAUDE_PLUGIN_DATA: s.dir}, stripeFactory: fakeFactory(rec)});
+  assert.equal(r.exitCode, 0);
+  const listCall = rec.find((x) => x.op === 'list');
+  assert.ok(listCall, 'list was called');
+  assert.equal(listCall.p.limit, 3);
+});
+
+test('--data with no = returns USAGE (exit 2), not a corrupt param', async () => {
+  const s = setup(ACCOUNTS);
+  const rec = [];
+  const r = await run(['customers', 'create', '--account', 'idd', '--data', 'bogusnoeq', '--accounts-file', s.regPath],
+    {env: {CLAUDE_PLUGIN_DATA: s.dir}, stripeFactory: fakeFactory(rec)});
+  assert.equal(r.exitCode, 2);
+  assert.match(r.stdout, /requires key=value/);
+  assert.equal(rec.length, 0);
 });

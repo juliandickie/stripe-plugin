@@ -93,6 +93,48 @@ test('callStripe with all uses autoPagingToArray', async () => {
   assert.deepEqual(c.calls[1], ['autopage', 5000]);
 });
 
+test('callStripe plain list passes req.limit through as params.limit', async () => {
+  const c = fakeClient();
+  await callStripe(c, 'customers', 'list', {params: {}, options: {}, limit: 5});
+  assert.equal(c.calls[0][0], 'customers.list');
+  assert.equal(c.calls[0][1].limit, 5);
+});
+
+test('callStripe --all --limit 0 caps autopage at 0, not 10000', async () => {
+  const c = fakeClient();
+  await callStripe(c, 'customers', 'list', {params: {}, options: {}, all: true, limit: 0});
+  assert.deepEqual(c.calls[1], ['autopage', 0]);
+});
+
+test('callStripe --all with no limit still caps autopage at 10000', async () => {
+  const c = fakeClient();
+  await callStripe(c, 'customers', 'list', {params: {}, options: {}, all: true});
+  assert.deepEqual(c.calls[1], ['autopage', 10000]);
+});
+
+test('callStripe rejects instance op invoked with no id (arity guard)', async () => {
+  const c = fakeClient();
+  await assert.rejects(
+    () => callStripe(c, 'customers', 'del', {options: {}}),
+    /requires --id \(instance operation\)/
+  );
+  // the fake del must NOT have been called
+  assert.equal(c.calls.length, 0);
+});
+
+test('callStripe arity guard does not false-positive on no-id singleton retrieve', async () => {
+  const c = fakeClient();
+  const out = await callStripe(c, 'balance', 'retrieve', {options: {}});
+  assert.equal(out.object, 'balance');
+  assert.deepEqual(c.calls[0], ['balance.retrieve', {}, {}]);
+});
+
+test('callStripe arity guard does not block create with no id', async () => {
+  const c = fakeClient();
+  const out = await callStripe(c, 'customers', 'create', {params: {email: 'a@b.co'}, options: {}});
+  assert.equal(out.id, 'cus_1');
+});
+
 test('callStripe does not mutate caller req.params when injecting expand', async () => {
   const c = fakeClient();
   const sharedParams = {email: 'a@b.co'};

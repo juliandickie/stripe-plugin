@@ -17,7 +17,7 @@ function parseArgs(argv) {
     if (t === '--account') a.account = argv[++i];
     else if (t === '--id') a.id = argv[++i];
     else if (t === '--params') a.params = JSON.parse(argv[++i]);
-    else if (t === '--data') { const kv = argv[++i]; const ix = kv.indexOf('='); a.data[kv.slice(0, ix)] = kv.slice(ix + 1); }
+    else if (t === '--data') { const kv = argv[++i]; const ix = kv.indexOf('='); if (ix < 0) throw new Error('--data requires key=value form, got: ' + kv); a.data[kv.slice(0, ix)] = kv.slice(ix + 1); }
     else if (t === '--expand') a.expand = argv[++i].split(',');
     else if (t === '--limit') a.limit = parseInt(argv[++i], 10);
     else if (t === '--all') a.all = true;
@@ -131,14 +131,34 @@ async function run(argv, ctx) {
         return {exitCode: EXIT.BULK, stdout: JSON.stringify(scopeReview(segment, a.action, a.bulkIds), null, 2)};
       }
     }
+    const isBulk = !!(a.bulkIds && a.bulkIds.length);
     if (!a.confirm) {
       const preview = 'CONFIRMATION REQUIRED\n'
         + 'account: ' + d.name + '\nmode: ' + d.mode.toUpperCase() + '\n'
         + 'operation: ' + a.resource + '.' + a.action + '\nclass: ' + cls + '\n'
+        + (isBulk
+          ? 'bulk: ' + a.bulkIds.length + ' targets\ntargets: ' + a.bulkIds.join(',') + '\n'
+          : 'target id: ' + (a.id ? a.id : '(none)') + '\n')
         + 'params: ' + JSON.stringify(params) + '\n'
         + (cls === 'destructive' ? 'IRREVERSIBLE: this operation cannot be undone.\n' : '')
         + 'Re-run with --confirm to execute.';
       return {exitCode: EXIT.CONFIRM, stdout: preview};
+    }
+    if (isBulk) {
+      const client = stripeFactory({apiKey: d.apiKey, apiVersion: a.apiVersion});
+      if (d.stripeAccount) req.options.stripeAccount = d.stripeAccount;
+      const results = [];
+      for (const bid of a.bulkIds) {
+        try {
+          const r2 = Object.assign({}, req, {id: bid, options: Object.assign({}, req.options)});
+          const data = await callStripe(client, a.resource, a.action, r2);
+          results.push({account: bid, ok: true, data: data});
+        } catch (e) {
+          results.push({account: bid, ok: false, error: mapStripeError(e)});
+        }
+      }
+      const agg = aggregate(results);
+      return {exitCode: agg.ok ? EXIT.OK : EXIT.ERROR, stdout: JSON.stringify(agg, null, 2)};
     }
     try {
       const client = stripeFactory({apiKey: d.apiKey, apiVersion: a.apiVersion});
