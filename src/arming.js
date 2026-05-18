@@ -41,7 +41,9 @@ function arm(account, env) {
   fs.mkdirSync(t.dir, {recursive: true});
   const s = readSet(env);
   s.add(account);
-  fs.writeFileSync(t.file, JSON.stringify({armed: Array.from(s)}));
+  const tmp = t.file + '.' + process.pid + '.' + Date.now() + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify({armed: Array.from(s)}));
+  fs.renameSync(tmp, t.file);
 }
 
 module.exports = {isArmed, arm};

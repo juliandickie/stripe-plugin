@@ -44,3 +44,14 @@ test('absent session id does not collide with a spoofed no-session caller', () =
   const absent = {CLAUDE_PLUGIN_DATA: base};
   assert.equal(isArmed('idd', absent), false);
 });
+
+test('arm writes atomically (no leftover .tmp, file valid after arm)', () => {
+  const env = {CLAUDE_PLUGIN_DATA: dataDir(), CLAUDE_SESSION_ID: 's-atomic'};
+  arm('a', env);
+  arm('b', env);
+  assert.equal(isArmed('a', env), true);
+  assert.equal(isArmed('b', env), true);
+  const dir = require('node:path').join(env.CLAUDE_PLUGIN_DATA, 'stripe-x', 'arming');
+  const leftover = require('node:fs').readdirSync(dir).filter((f) => f.endsWith('.tmp'));
+  assert.deepEqual(leftover, []);
+});
