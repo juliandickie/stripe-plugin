@@ -2,7 +2,7 @@
 'use strict';
 // Thin opt-in MCP stdio server. Exits immediately unless enabled, so the
 // default install path is the CLI plus skills, not an MCP connector.
-const {shouldRun, listTools, handleCall} = require('./mcp_shim');
+const {shouldRun, listTools, handleCall, listAccounts} = require('./mcp_shim');
 
 if (!shouldRun(process.env)) {
   process.stderr.write('stripe-shim disabled (set enable_mcp_shim to true to use it)\n');
@@ -40,6 +40,9 @@ async function handle(msg) {
     return reply({tools: listTools()});
   }
   if (msg.method === 'tools/call') {
+    if (msg.params && msg.params.name === 'stripe_accounts') {
+      return reply({content: [{type: 'text', text: JSON.stringify(listAccounts(process.env), null, 2)}], isError: false});
+    }
     const r = await handleCall((msg.params && msg.params.arguments) || {}, {});
     return reply({content: [{type: 'text', text: r.stdout}], isError: r.exitCode !== 0});
   }
