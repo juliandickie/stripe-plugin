@@ -42,8 +42,9 @@ test('READ_ACTIONS is frozen', () => {
   assert.ok(Object.isFrozen(READ_ACTIONS));
 });
 
-test('capture and invoices.pay are mutating (documented residual; still --confirm gated, no IRREVERSIBLE label)', () => {
-  assert.equal(classify('paymentIntents', 'capture'), 'mutating');
-  assert.equal(classify('charges', 'capture'), 'mutating');
-  assert.equal(classify('invoices', 'pay'), 'mutating');
+test('payment-execution ops are destructive (capture/confirm/pay settle real money irreversibly)', () => {
+  assert.equal(classify('paymentIntents', 'capture'), 'destructive');
+  assert.equal(classify('paymentIntents', 'confirm'), 'destructive');
+  assert.equal(classify('charges', 'capture'), 'destructive');
+  assert.equal(classify('invoices', 'pay'), 'destructive');
 });
