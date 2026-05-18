@@ -12,8 +12,16 @@ allowed-tools: Bash Read
 `stripe-x webhookEndpoints create --account <name> --data url=https://... --data 'enabled_events[]=*'` (mutating, confirmed)
 `stripe-x webhookEndpoints del --id we_123 --account <name>` (destructive, confirmed)
 
-## Live events and test events (bundled Stripe CLI)
+## Live events and test events (engine-wrapped bundled Stripe CLI)
 
-The bundled CLI binary is at `${CLAUDE_PLUGIN_DATA}/stripe-cli/<pinned-version>/stripe`. Invoke it with the resolved account key. `stripe listen` is long-running: start it as a background task and tail its log. `stripe trigger <event>` is blocked by the engine in live mode and only runs in test mode. `stripe logs tail` is read-only and allowed in live with no arming.
+Invoke the bundled Stripe CLI ONLY through the engine wrapper, never the raw binary, so the per-account key is injected and `stripe trigger` is blocked in live by the binary:
+
+`${CLAUDE_PLUGIN_ROOT}/bin/stripe-x cli listen --account <name>`  (long-running: run as a background task, tail its output)
+
+`${CLAUDE_PLUGIN_ROOT}/bin/stripe-x cli trigger <event> --account <name>`  (test-mode only; the engine refuses `stripe trigger` when --live is set)
+
+`${CLAUDE_PLUGIN_ROOT}/bin/stripe-x cli logs tail --account <name>`  (read-only; allowed in live)
+
+The wrapper resolves the account (standalone or Connect), passes `--api-key` (and `--stripe-account` for Connect), refuses `trigger` in live mode, and execs the pinned bundled binary at `${CLAUDE_PLUGIN_DATA}/stripe-cli/<pinned-version>/stripe`. Do not run that binary directly.
 
 Always confirm endpoint creation and deletion previews with the user before `--confirm`.

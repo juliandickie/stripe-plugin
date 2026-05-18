@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const {run} = require('../src/cli');
+const {run, EXIT} = require('../src/cli');
 
 function setup(accounts) {
   const dir = path.join(os.tmpdir(), 'cli-' + Math.random().toString(16).slice(2));
@@ -279,4 +279,110 @@ test('--data with no = returns USAGE (exit 2), not a corrupt param', async () =>
   assert.equal(r.exitCode, 2);
   assert.match(r.stdout, /requires key=value/);
   assert.equal(rec.length, 0);
+});
+
+// ---- cli wrapper (engine-enforced per-account key + trigger-live block) ----
+
+const CLI_VERSION = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'stripe-cli-version.txt'), 'utf8').trim();
+
+// Materialize the pinned bundled binary so resolveCliBinary's path exists and
+// the spawn branch is reached (the handler refuses if the binary is absent).
+function provisionBinary(dir) {
+  const binDir = path.join(dir, 'stripe-cli', CLI_VERSION);
+  fs.mkdirSync(binDir, {recursive: true});
+  const bin = path.join(binDir, 'stripe');
+  fs.writeFileSync(bin, '#!/bin/sh\nexit 0\n');
+  fs.chmodSync(bin, 0o755);
+  return bin;
+}
+
+// Recording fake spawn: never execs anything; records (bin,args) and returns {status:0}.
+function recordingSpawn(calls) {
+  return (bin, args, opts) => { calls.push({bin: bin, args: args, opts: opts}); return {status: 0}; };
+}
+
+test('cli trigger in live is binary-refused before any spawn (no exec, no key leak)', async () => {
+  const s = setup(ACCOUNTS);
+  provisionBinary(s.dir);
+  const calls = [];
+  const r = await run(['cli', 'trigger', 'payment_intent.succeeded', '--account', 'idd', '--live', '--accounts-file', s.regPath],
+    {env: {CLAUDE_PLUGIN_DATA: s.dir}, cliSpawn: recordingSpawn(calls)});
+  assert.notEqual(r.exitCode, 0);
+  assert.match(r.stdout, /blocked in live/i);
+  assert.equal(calls.length, 0);
+  assert.ok(r.stdout.indexOf('sk_test_idd') < 0 && r.stdout.indexOf('sk_live_idd') < 0, 'no key in output');
+});
+
+test('cli trigger in test mode injects the resolved TEST key and runs once', async () => {
+  const s = setup(ACCOUNTS);
+  provisionBinary(s.dir);
+  const calls = [];
+  const r = await run(['cli', 'trigger', 'payment_intent.succeeded', '--account', 'idd', '--accounts-file', s.regPath],
+    {env: {CLAUDE_PLUGIN_DATA: s.dir}, cliSpawn: recordingSpawn(calls)});
+  assert.equal(r.exitCode, 0);
+  assert.equal(calls.length, 1);
+  assert.ok(calls[0].args.indexOf('trigger') >= 0, 'subcommand passed through');
+  assert.ok(calls[0].args.indexOf('--api-key') >= 0, '--api-key injected');
+  assert.ok(calls[0].args.indexOf('sk_test_idd') >= 0, 'resolved TEST key injected');
+});
+
+test('cli listen on a connect account injects platform key AND --stripe-account', async () => {
+  const s = setup(ACCOUNTS);
+  provisionBinary(s.dir);
+  const calls = [];
+  const r = await run(['cli', 'listen', '--account', 'acme', '--accounts-file', s.regPath],
+    {env: {CLAUDE_PLUGIN_DATA: s.dir}, cliSpawn: recordingSpawn(calls)});
+  assert.equal(r.exitCode, 0);
+  assert.equal(calls.length, 1);
+  const args = calls[0].args;
+  assert.ok(args.indexOf('--api-key') >= 0 && args.indexOf('sk_test_idd') >= 0, 'platform key injected');
+  assert.ok(args.indexOf('--stripe-account') >= 0 && args.indexOf('acct_ACME') >= 0, 'connected account injected');
+});
+
+test('cli with an unknown account is refused (EXIT.ERROR) and never spawns', async () => {
+  const s = setup(ACCOUNTS);
+  provisionBinary(s.dir);
+  const calls = [];
+  const r = await run(['cli', 'listen', '--account', 'nope', '--accounts-file', s.regPath],
+    {env: {CLAUDE_PLUGIN_DATA: s.dir}, cliSpawn: recordingSpawn(calls)});
+  assert.equal(r.exitCode, EXIT.ERROR);
+  assert.equal(calls.length, 0);
+});
+
+test('cli with no subcommand returns USAGE (exit 2)', async () => {
+  const s = setup(ACCOUNTS);
+  provisionBinary(s.dir);
+  const calls = [];
+  const r = await run(['cli', '--account', 'idd', '--accounts-file', s.regPath],
+    {env: {CLAUDE_PLUGIN_DATA: s.dir}, cliSpawn: recordingSpawn(calls)});
+  assert.equal(r.exitCode, EXIT.USAGE);
+  assert.equal(calls.length, 0);
+});
+
+test('cli when the resolved binary is absent refuses with /not provisioned/ and never spawns', async () => {
+  const s = setup(ACCOUNTS); // note: no provisionBinary -> path is absent
+  const r = await run(['cli', 'listen', '--account', 'idd', '--accounts-file', s.regPath],
+    {env: {CLAUDE_PLUGIN_DATA: s.dir},
+      cliSpawn: () => { throw new Error('spawn must not be reached when binary is absent'); }});
+  assert.equal(r.exitCode, EXIT.ERROR);
+  assert.match(r.stdout, /not provisioned/);
+});
+
+test('cli engine output never leaks the resolved api key across paths', async () => {
+  const s = setup(ACCOUNTS);
+  provisionBinary(s.dir);
+  const calls = [];
+  const outs = [];
+  for (const argv of [
+    ['cli', 'trigger', 'pi.succeeded', '--account', 'idd', '--live', '--accounts-file', s.regPath],
+    ['cli', 'trigger', 'pi.succeeded', '--account', 'idd', '--accounts-file', s.regPath],
+    ['cli', 'listen', '--account', 'acme', '--accounts-file', s.regPath],
+    ['cli', '--account', 'idd', '--accounts-file', s.regPath]
+  ]) {
+    const r = await run(argv, {env: {CLAUDE_PLUGIN_DATA: s.dir}, cliSpawn: recordingSpawn(calls)});
+    outs.push(r.stdout);
+  }
+  const joined = outs.join('\n');
+  assert.ok(joined.indexOf('sk_test_idd') < 0, 'test key must not leak into engine output');
+  assert.ok(joined.indexOf('sk_live_idd') < 0, 'live key must not leak into engine output');
 });

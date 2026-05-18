@@ -90,6 +90,9 @@ async function run(argv, ctx) {
     }
     return {exitCode: EXIT.OK, stdout: 'Operations for "' + query + '":\n' + matches.map((k) => k + '  [' + apiMap[k].httpMethod + ']').join('\n')};
   }
+  if (a.resource === 'cli') {
+    return await runCliBridge(a, env, ctx);
+  }
   if (!a.resource || !a.action) {
     return {exitCode: EXIT.USAGE, stdout: 'Usage: stripe-x <resource.path> <action> [flags]'};
   }
@@ -190,6 +193,55 @@ async function run(argv, ctx) {
   }
   const agg = aggregate(results);
   return {exitCode: agg.ok ? EXIT.OK : EXIT.ERROR, stdout: JSON.stringify(agg, null, 2)};
+}
+
+async function runCliBridge(a, env, ctx) {
+  const {resolveRegistryPath, loadRegistry} = require('./registry');
+  const {resolveAccount} = require('./resolver');
+  const {buildCliArgs, blocksTriggerInLive, resolveCliBinary} = require('./cli_bridge');
+  const fs = require('node:fs');
+  const path = require('node:path');
+
+  let reg;
+  try {
+    reg = loadRegistry(resolveRegistryPath({flag: a.accountsFile}, env));
+  } catch (e) {
+    return {exitCode: EXIT.ERROR, stdout: JSON.stringify({error: {message: e.message}})};
+  }
+
+  let d;
+  try {
+    d = resolveAccount(reg, a.account || reg.default_account, {live: !!a.live, env: env});
+  } catch (e) {
+    return {exitCode: EXIT.ERROR, stdout: JSON.stringify({error: {message: e.message}})};
+  }
+
+  const cliArgs = a._.slice(1);
+  if (cliArgs.length === 0) {
+    return {exitCode: EXIT.USAGE, stdout: 'Usage: stripe-x cli <stripe-cli-subcommand> [args] --account <name> [--live]'};
+  }
+
+  const sub = cliArgs[0];
+  if (blocksTriggerInLive(sub, d.mode)) {
+    return {exitCode: EXIT.ERROR, stdout: 'REFUSED: "stripe ' + sub + '" is blocked in live mode (test-mode events only). Re-run without --live.'};
+  }
+
+  let version;
+  try {
+    version = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'stripe-cli-version.txt'), 'utf8').trim();
+  } catch (e) {
+    return {exitCode: EXIT.ERROR, stdout: 'Stripe CLI version pin missing'};
+  }
+
+  const bin = resolveCliBinary(env, version);
+  if (!fs.existsSync(bin)) {
+    return {exitCode: EXIT.ERROR, stdout: 'Stripe CLI not provisioned at ' + bin + '. Run /stripe:stripe-setup (or let the SessionStart hook provision it).'};
+  }
+
+  const args = buildCliArgs(cliArgs, {apiKey: d.apiKey, stripeAccount: d.stripeAccount});
+  const spawn = (ctx && ctx.cliSpawn) || require('node:child_process').spawnSync;
+  const r = spawn(bin, args, {stdio: 'inherit'});
+  return {exitCode: (r && typeof r.status === 'number') ? r.status : 1, stdout: ''};
 }
 
 module.exports = {run, parseArgs, buildParams, EXIT};
