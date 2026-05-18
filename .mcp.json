@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "stripe-shim": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/src/mcp_shim_server.js"]
+    }
+  }
+}

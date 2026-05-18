@@ -1,0 +1,39 @@
+'use strict';
+const {run} = require('./cli');
+
+function shouldRun(env) {
+  return env.CLAUDE_PLUGIN_OPTION_ENABLE_MCP_SHIM === 'true';
+}
+
+function listTools() {
+  return [
+    {name: 'stripe_call', description: 'Call any Stripe endpoint via the engine. Args mirror the stripe-x CLI grammar; the binary still enforces confirmation, arming, and fan-out rules.',
+      inputSchema: {type: 'object', required: ['resource', 'action'], properties: {
+        resource: {type: 'string'}, action: {type: 'string'}, account: {type: 'string'},
+        live: {type: 'boolean'}, id: {type: 'string'}, params: {type: 'object'},
+        expand: {type: 'array', items: {type: 'string'}}, all: {type: 'boolean'},
+        confirm: {type: 'boolean'}, confirm_bulk: {type: 'boolean'}, arm_live: {type: 'boolean'}}}},
+    {name: 'stripe_accounts', description: 'List configured accounts (names, labels, types, modes). Never returns secrets.',
+      inputSchema: {type: 'object', properties: {}}}
+  ];
+}
+
+function toArgv(input) {
+  const a = [input.resource, input.action];
+  if (input.account) a.push('--account', input.account);
+  if (input.live) a.push('--live');
+  if (input.id) a.push('--id', input.id);
+  if (input.params) a.push('--params', JSON.stringify(input.params));
+  if (input.expand) a.push('--expand', input.expand.join(','));
+  if (input.all) a.push('--all');
+  if (input.confirm) a.push('--confirm');
+  if (input.confirm_bulk) a.push('--confirm-bulk');
+  if (input.arm_live) a.push('--arm-live');
+  return a;
+}
+
+async function handleCall(input, ctx) {
+  return run(toArgv(input), ctx || {});
+}
+
+module.exports = {shouldRun, listTools, toArgv, handleCall};
