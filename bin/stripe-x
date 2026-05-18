@@ -1,0 +1,10 @@
+#!/usr/bin/env node
+'use strict';
+const {run} = require('../src/cli');
+run(process.argv.slice(2), {}).then((r) => {
+  process.stdout.write(r.stdout + '\n');
+  process.exit(r.exitCode);
+}).catch((e) => {
+  process.stdout.write(JSON.stringify({error: {message: e.message}}) + '\n');
+  process.exit(1);
+});
