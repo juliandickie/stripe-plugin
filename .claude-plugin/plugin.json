@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "stripe",
+  "version": "0.1.0",
+  "description": "Full programmatic access to every Stripe API endpoint across many accounts. Multi-account (standalone keys and Connect), binary-enforced safety tier with live-mode arming, bundled Stripe CLI for webhooks. Proactively activates for: (1) any Stripe data lookup or operation, (2) cross-account Stripe reporting, (3) webhooks and CLI tasks.",
+  "author": { "name": "Julian Dickie", "url": "https://github.com/juliandickie" },
+  "homepage": "https://github.com/juliandickie/stripe-plugin",
+  "repository": "https://github.com/juliandickie/stripe-plugin",
+  "license": "MIT",
+  "keywords": ["stripe", "payments", "multi-account", "connect", "webhooks", "billing", "mcp"],
+  "userConfig": {
+    "accounts_file": {
+      "type": "file",
+      "title": "Accounts registry file",
+      "description": "Path to the JSON accounts registry. If unset, defaults to the plugin data dir."
+    },
+    "default_account": {
+      "type": "string",
+      "title": "Default account name",
+      "description": "Account name used when no --account is given."
+    },
+    "bulk_threshold": {
+      "type": "number",
+      "title": "Bulk scope-review threshold",
+      "description": "A single-account write affecting more than this many items requires bulk scope review.",
+      "min": 1,
+      "max": 1000,
+      "default": 10
+    },
+    "enable_mcp_shim": {
+      "type": "boolean",
+      "title": "Enable optional MCP shim",
+      "description": "Expose stripe_call and stripe_accounts as MCP tools. Off by default; the primary path is the CLI plus skills.",
+      "default": false
+    }
+  }
+}

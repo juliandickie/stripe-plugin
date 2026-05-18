@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "stripe-plugin",
+  "description": "Standalone marketplace for the stripe plugin - full multi-account Stripe API access for Claude Code.",
+  "owner": { "name": "Julian Dickie", "url": "https://github.com/juliandickie" },
+  "plugins": [
+    {
+      "name": "stripe",
+      "description": "Full programmatic access to every Stripe API endpoint across many accounts (standalone keys and Connect), with a binary-enforced safety tier and the bundled Stripe CLI.",
+      "source": { "source": "url", "url": "https://github.com/juliandickie/stripe-plugin.git" },
+      "author": { "name": "Julian Dickie", "url": "https://github.com/juliandickie" },
+      "homepage": "https://github.com/juliandickie/stripe-plugin",
+      "repository": "https://github.com/juliandickie/stripe-plugin",
+      "license": "MIT",
+      "category": "productivity",
+      "keywords": ["stripe", "payments", "multi-account", "connect", "webhooks", "mcp"]
+    }
+  ]
+}
