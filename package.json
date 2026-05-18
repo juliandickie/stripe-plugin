@@ -1,0 +1,14 @@
+{
+  "name": "stripe-x-engine",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Engine for the stripe Claude Code plugin",
+  "license": "MIT",
+  "bin": { "stripe-x": "bin/stripe-x" },
+  "engines": { "node": ">=18" },
+  "dependencies": { "stripe": "22.1.1" },
+  "scripts": {
+    "test": "node --test test/",
+    "gen-api-map": "node scripts/gen-api-map.js"
+  }
+}
