@@ -57,4 +57,13 @@ async function callStripe(client, resourcePath, action, req) {
   return result;
 }
 
-module.exports = {camelizePath, resolveMethod, callStripe, genIdempotencyKey};
+function preflight(apiMap, resourcePath, action) {
+  const camel = camelizePath(resourcePath);
+  const key = camel + '.' + action;
+  if (apiMap[key]) return {ok: true, info: apiMap[key]};
+  const head = camel.split('.')[0];
+  const near = Object.keys(apiMap).filter((k) => k.indexOf(head) === 0).slice(0, 8);
+  return {ok: false, message: 'Unknown operation "' + key + '". Did you mean: ' + (near.join(', ') || '(none)') + '. Run `stripe-x help ' + resourcePath + '`.'};
+}
+
+module.exports = {camelizePath, resolveMethod, callStripe, genIdempotencyKey, preflight};
