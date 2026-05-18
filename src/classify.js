@@ -18,6 +18,8 @@ const DESTRUCTIVE = Object.freeze([
   'paymentIntents.cancel',
   'invoices.del', 'invoices.voidInvoice', 'invoices.markUncollectible',
   'disputes.close',
+  // 'sources.detach' is a legacy placeholder; the live detach path is
+  // customers.deleteSource, already destructive via the delete-prefix rule.
   'sources.detach',
   'accounts.del', 'accounts.reject',
   'applicationFees.createRefund',

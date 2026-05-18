@@ -1,6 +1,6 @@
 # stripe
 
-Full programmatic access to every Stripe API endpoint across many accounts, for Claude Code. Replaces the single-account Stripe MCP connector with a multi-account engine (standalone keys and Stripe Connect), a binary-enforced safety tier with live-mode arming, and the bundled official Stripe CLI for webhooks.
+Full programmatic access to every Stripe API endpoint the pinned stripe-node SDK exposes, across many accounts, for Claude Code. Replaces the single-account Stripe MCP connector with a multi-account engine (standalone keys and Stripe Connect), a binary-enforced safety tier with live-mode arming, and the bundled official Stripe CLI for webhooks.
 
 ## Install
 

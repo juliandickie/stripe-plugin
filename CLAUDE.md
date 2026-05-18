@@ -2,7 +2,7 @@
 
 ## What this plugin does
 
-Full programmatic access to every Stripe API endpoint across many accounts (standalone keys and Connect), replacing the single-account MCP connector. The engine binary owns all safety enforcement.
+Full programmatic access to every Stripe API endpoint the pinned stripe-node SDK exposes, across many accounts (standalone keys and Connect), replacing the single-account MCP connector. The engine binary owns all safety enforcement.
 
 ## Layout rules
 

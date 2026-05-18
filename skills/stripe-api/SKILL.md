@@ -6,7 +6,7 @@ allowed-tools: Bash Read
 
 # Stripe API
 
-Every Stripe endpoint is reachable through the bundled engine. Do not hand-write HTTP calls.
+Every Stripe endpoint the pinned stripe-node SDK exposes is reachable through the bundled engine. Do not hand-write HTTP calls.
 
 ## Command grammar
 
