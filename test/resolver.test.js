@@ -1,6 +1,6 @@
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
-const {resolveAccount, sourceSecret} = require('../src/resolver');
+const {resolveAccount, sourceSecret, expandAccounts, isFanOut} = require('../src/resolver');
 
 const reg = {
   default_account: 'idd',
@@ -60,8 +60,6 @@ test('connect live mode uses platform live key (env-sourced) plus stripeAccount'
   assert.equal(d.mode, 'live');
 });
 
-const {expandAccounts, isFanOut} = require('../src/resolver');
-
 test('expandAccounts handles single, comma list, and all', () => {
   assert.deepEqual(expandAccounts(reg, 'idd'), ['idd']);
   assert.deepEqual(expandAccounts(reg, 'idd,acme'), ['idd', 'acme']);
@@ -75,4 +73,9 @@ test('expandAccounts rejects unknown name in list', () => {
 test('isFanOut true for more than one account', () => {
   assert.equal(isFanOut(['idd']), false);
   assert.equal(isFanOut(['idd', 'acme']), true);
+});
+
+test('expandAccounts throws on empty spec', () => {
+  assert.throws(() => expandAccounts(reg, ''), /No account specified/);
+  assert.throws(() => expandAccounts(reg, ','), /No account specified/);
 });
