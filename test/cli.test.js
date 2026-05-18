@@ -368,6 +368,24 @@ test('cli when the resolved binary is absent refuses with /not provisioned/ and 
   assert.match(r.stdout, /not provisioned/);
 });
 
+test('create + --bulk-ids is refused fail-loud (incoherent combo)', async () => {
+  const s = setup(ACCOUNTS);
+  const rec = [];
+  const r = await run(['customers', 'create', '--account', 'idd', '--bulk-ids', 'cus_1,cus_2', '--confirm', '--confirm-bulk', '--accounts-file', s.regPath],
+    {env: {CLAUDE_PLUGIN_DATA: s.dir}, stripeFactory: fakeFactory(rec)});
+  assert.equal(r.exitCode, 2);
+  assert.match(r.stdout, /bulk-ids cannot be combined with a create/i);
+  assert.equal(rec.length, 0); // never executed
+});
+
+test('instance-op bulk still works after the create+bulk guard', async () => {
+  const s = setup(ACCOUNTS);
+  const rec = [];
+  const r = await run(['customers', 'del', '--account', 'idd', '--bulk-ids', 'cus_1,cus_2,cus_3', '--confirm', '--confirm-bulk', '--accounts-file', s.regPath],
+    {env: {CLAUDE_PLUGIN_DATA: s.dir}, stripeFactory: fakeFactory(rec)});
+  assert.equal(r.exitCode, 0);
+});
+
 test('cli engine output never leaks the resolved api key across paths', async () => {
   const s = setup(ACCOUNTS);
   provisionBinary(s.dir);

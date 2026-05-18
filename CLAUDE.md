@@ -10,7 +10,7 @@ Component dirs at plugin root. Only the manifest in .claude-plugin/. All interna
 
 ## When extending
 
-The dispatcher is reflective; never add per-endpoint code. To track new Stripe endpoints, bump the stripe dependency, re-run npm run gen-api-map, update CHANGELOG with the new pinned API version from node_modules/stripe/cjs/apiVersion.js.
+The dispatcher is reflective; never add per-endpoint code. To track new Stripe endpoints, bump the stripe dependency, re-run npm run gen-api-map, update CHANGELOG with the new pinned API version from node_modules/stripe/cjs/apiVersion.js. When bumping the stripe dependency, also re-probe method arities (instance ops should be fn.length>=3, collection/singleton<=2) since src/dispatch.js's missing-id guard depends on that; it fails safe (clean error, never a silent malformed call) but a silent arity change should be caught at bump time.
 
 Safety classification is action-name plus the frozen DESTRUCTIVE override list in src/classify.js. Adding a money-mover means adding it there with a test.
 

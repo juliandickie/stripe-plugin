@@ -129,6 +129,9 @@ async function run(argv, ctx) {
       }
     }
     if (a.bulkIds && a.bulkIds.length) {
+      if (a.action === 'create' || /^create[A-Z]/.test(a.action)) {
+        return {exitCode: EXIT.USAGE, stdout: 'REFUSED: --bulk-ids cannot be combined with a create action (bulk-ids operates on existing object ids). Use a single create, or a per-id instance action (del/cancel/update/capture).'};
+      }
       const threshold = parseInt(env.CLAUDE_PLUGIN_OPTION_BULK_THRESHOLD || '10', 10);
       if (needsScopeReview(a.bulkIds.length, threshold) && !a.confirmBulk) {
         return {exitCode: EXIT.BULK, stdout: JSON.stringify(scopeReview(segment, a.action, a.bulkIds), null, 2)};
