@@ -1,0 +1,41 @@
+const {test} = require('node:test');
+const assert = require('node:assert/strict');
+const {resolveAccount, sourceSecret} = require('../src/resolver');
+
+const reg = {
+  default_account: 'idd',
+  accounts: {
+    idd: {type: 'standalone', test_secret_key: 'sk_test_idd', live_secret_key: 'env:IDD_LIVE'},
+    promktg: {type: 'standalone', test_secret_key: 'sk_test_pm', live_secret_key: 'sk_live_pm'},
+    acme: {type: 'connect', platform: 'promktg', connected_account: 'acct_ACME'}
+  }
+};
+
+test('sourceSecret resolves literal and env: forms', () => {
+  assert.equal(sourceSecret('sk_test_x', {}), 'sk_test_x');
+  assert.equal(sourceSecret('env:FOO', {FOO: 'sk_live_y'}), 'sk_live_y');
+  assert.throws(() => sourceSecret('env:MISSING', {}), /MISSING/);
+});
+
+test('standalone test mode uses test key, no stripeAccount', () => {
+  const d = resolveAccount(reg, 'idd', {live: false, env: {}});
+  assert.equal(d.apiKey, 'sk_test_idd');
+  assert.equal(d.stripeAccount, undefined);
+  assert.equal(d.mode, 'test');
+});
+
+test('standalone live mode reads env-sourced key', () => {
+  const d = resolveAccount(reg, 'idd', {live: true, env: {IDD_LIVE: 'sk_live_idd'}});
+  assert.equal(d.apiKey, 'sk_live_idd');
+  assert.equal(d.mode, 'live');
+});
+
+test('connect resolves platform key plus stripeAccount', () => {
+  const d = resolveAccount(reg, 'acme', {live: false, env: {}});
+  assert.equal(d.apiKey, 'sk_test_pm');
+  assert.equal(d.stripeAccount, 'acct_ACME');
+});
+
+test('unknown account throws with available names', () => {
+  assert.throws(() => resolveAccount(reg, 'nope', {live: false, env: {}}), /idd, promktg, acme/);
+});
