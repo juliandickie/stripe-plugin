@@ -24,3 +24,23 @@ test('arm then isArmed true for same session and account only', () => {
   const env2 = Object.assign({}, env, {CLAUDE_SESSION_ID: 's2'});
   assert.equal(isArmed('idd', env2), false);
 });
+
+test('crafted session id cannot escape the arming directory', () => {
+  const base = dataDir();
+  const armingRoot = path.join(base, 'stripe-x', 'arming');
+  const env = {CLAUDE_PLUGIN_DATA: base, CLAUDE_SESSION_ID: '../../../../tmp/evil'};
+  arm('idd', env);
+  // The token file must remain inside the arming root, not at a traversed path.
+  const files = fs.readdirSync(armingRoot);
+  assert.equal(files.length, 1);
+  assert.ok(!files[0].includes('/') && !files[0].includes('..'));
+  assert.equal(isArmed('idd', env), true);
+});
+
+test('absent session id does not collide with a spoofed no-session caller', () => {
+  const base = dataDir();
+  const spoof = {CLAUDE_PLUGIN_DATA: base, CLAUDE_SESSION_ID: 'no-session'};
+  arm('idd', spoof);
+  const absent = {CLAUDE_PLUGIN_DATA: base};
+  assert.equal(isArmed('idd', absent), false);
+});

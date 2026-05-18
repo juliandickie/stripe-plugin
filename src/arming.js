@@ -1,11 +1,26 @@
 'use strict';
 const fs = require('node:fs');
 const path = require('node:path');
+const crypto = require('node:crypto');
+
+// Used only when no CLAUDE_SESSION_ID is provided. Generated once per process
+// so it cannot be spoofed by a caller setting CLAUDE_SESSION_ID to a fixed
+// sentinel, and so two separate no-session CLI invocations never share arming
+// state (the safe under-arm direction).
+const EPHEMERAL_SID = 'ephemeral-' + crypto.randomUUID();
+
+// Strip anything that is not a safe filename character so a crafted
+// CLAUDE_SESSION_ID (e.g. containing ../) cannot escape the arming directory.
+function safeSid(env) {
+  const raw = env.CLAUDE_SESSION_ID;
+  if (!raw) return EPHEMERAL_SID;
+  const cleaned = String(raw).replace(/[^A-Za-z0-9_-]/g, '_');
+  return cleaned.length > 0 ? cleaned : EPHEMERAL_SID;
+}
 
 function tokenPath(env) {
   const dir = path.join(env.CLAUDE_PLUGIN_DATA || '.', 'stripe-x', 'arming');
-  const sid = env.CLAUDE_SESSION_ID || 'no-session';
-  return {dir: dir, file: path.join(dir, sid + '.json')};
+  return {dir: dir, file: path.join(dir, safeSid(env) + '.json')};
 }
 
 function readSet(env) {
