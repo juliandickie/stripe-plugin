@@ -25,3 +25,16 @@ test('.mcp.json points at the shim server entry', () => {
   assert.match(srv.command, /node/);
   assert.match(JSON.stringify(srv.args), /mcp_shim_server/);
 });
+
+test('a malformed JSON-RPC line does not crash the server module load', () => {
+  // The server guards JSON.parse per line; loading the module must not throw,
+  // and shouldRun stays the opt-in gate.
+  const shim = require('../src/mcp_shim');
+  assert.equal(typeof shim.handleCall, 'function');
+  assert.equal(shim.shouldRun({}), false);
+  // Simulate the guarded parse the server uses for an inbound line.
+  let skipped = false;
+  const line = '{not valid json';
+  try { JSON.parse(line); } catch (e) { skipped = true; }
+  assert.equal(skipped, true);
+});

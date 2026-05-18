@@ -16,7 +16,16 @@ process.stdin.on('data', (d) => {
   while ((nl = buf.indexOf('\n')) >= 0) {
     const line = buf.slice(0, nl);
     buf = buf.slice(nl + 1);
-    if (line.trim()) handle(JSON.parse(line));
+    if (line.trim()) {
+      let msg;
+      try {
+        msg = JSON.parse(line);
+      } catch (e) {
+        process.stderr.write('stripe-shim: skipping malformed JSON-RPC line\n');
+        continue;
+      }
+      handle(msg);
+    }
   }
 });
 
