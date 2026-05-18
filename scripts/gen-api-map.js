@@ -58,6 +58,7 @@ function walk(node, prefix) {
     if (key.startsWith('_') || key === 'lastResponse') continue;
     let val;
     try { val = node[key]; } catch (e) { continue; }
+    if (val === client) continue; // class-name-independent guard against the namespace .stripe back-reference (prevents the walk exploding)
     if (!isResource(val)) continue;
     if (seenObjs.has(val)) continue;
     const dotted = prefix ? prefix + '.' + key : key;
