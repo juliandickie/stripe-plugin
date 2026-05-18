@@ -9,6 +9,9 @@ test('api-map asset exists and contains core resources', () => {
   assert.ok(map['refunds.create']);
   assert.equal(map['customers.create'].httpMethod, 'POST');
   assert.equal(map['customers.list'].httpMethod, 'GET');
+  assert.ok(map['issuing.cards.list'], 'issuing.cards.list missing - namespace tier not walked');
+  assert.ok(map['treasury.financialAccounts.retrieve'], 'treasury.financialAccounts.retrieve missing');
+  assert.ok(map['checkout.sessions.create'], 'checkout.sessions.create missing');
 });
 
 test('preflight passes for a known operation', () => {
