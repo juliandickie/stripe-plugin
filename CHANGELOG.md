@@ -12,7 +12,7 @@ Initial release.
 
 - Binary-enforced three-class safety tier (read, mutating, destructive) with orthogonal live-mode session arming and bulk scope review.
 
-- Payment-execution operations (paymentIntents.capture, paymentIntents.confirm, charges.capture, invoices.pay) are classified destructive so they show the IRREVERSIBLE confirmation preview, alongside refunds, payouts, transfers, cancels, and deletes.
+- Payment-execution and fund-movement operations (paymentIntents.capture, paymentIntents.confirm, charges.capture, invoices.pay, topups.create) are classified destructive so they show the IRREVERSIBLE confirmation preview, alongside refunds, payouts, transfers, cancels, and deletes.
 
 - Bundled official Stripe CLI provisioning (pinned, checksum-verified) for listen, trigger, logs tail, fixtures, samples.
 
