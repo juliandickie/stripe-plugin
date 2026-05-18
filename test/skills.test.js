@@ -16,3 +16,12 @@ test('stripe-setup is user-only and documents registry scaffolding', () => {
   assert.match(f.raw, /accounts\.json/);
   assert.match(f.raw, /chmod 600/);
 });
+
+test('stripe-api documents the dispatcher grammar and is model-invocable', () => {
+  const f = fm(__dirname + '/../skills/stripe-api/SKILL.md');
+  assert.match(f.front, /name:\s*stripe-api/);
+  assert.ok(!/disable-model-invocation:\s*true/.test(f.front));
+  assert.match(f.raw, /stripe-x <resource\.path> <action>/);
+  assert.match(f.raw, /--confirm/);
+  assert.match(f.raw, /--account/);
+});
