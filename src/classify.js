@@ -24,10 +24,11 @@ const DESTRUCTIVE = new Set([
   'reviews.approve',
   'cards.create',
   'readers.cancelAction',
-  // Execute or capture a payment: funds move/settle and cannot be undone.
+  // Execute or capture a payment, or move funds: cannot be undone.
   'paymentIntents.capture', 'paymentIntents.confirm',
   'charges.capture',
   'invoices.pay',
+  'topups.create'
 ]);
 Object.freeze(DESTRUCTIVE);
 

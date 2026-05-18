@@ -47,4 +47,5 @@ test('payment-execution ops are destructive (capture/confirm/pay settle real mon
   assert.equal(classify('paymentIntents', 'confirm'), 'destructive');
   assert.equal(classify('charges', 'capture'), 'destructive');
   assert.equal(classify('invoices', 'pay'), 'destructive');
+  assert.equal(classify('topups', 'create'), 'destructive');
 });
