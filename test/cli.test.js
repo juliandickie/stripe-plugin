@@ -97,3 +97,30 @@ test('bulk write over threshold without --confirm-bulk returns scope review (exi
   assert.equal(out.kind, 'scope_review_required');
   assert.equal(out.count, 12);
 });
+
+test('buildParams does not pollute Object.prototype via --data', async () => {
+  const s = setup(ACCOUNTS);
+  const r = await run(['customers', 'create', '--account', 'idd', '--data', '__proto__[polluted]=yes', '--data', 'constructor[bad]=x', '--data', 'email=a@b.co', '--accounts-file', s.regPath],
+    {env: {CLAUDE_PLUGIN_DATA: s.dir}, stripeFactory: fakeFactory([])});
+  assert.equal(({}).polluted, undefined);
+  assert.equal(({}).bad, undefined);
+  // still a normal (mutating) op: preview, exit 10
+  assert.equal(r.exitCode, 10);
+});
+
+test('live mutating with --arm-live and --confirm executes (positive armed path)', async () => {
+  const s = setup(ACCOUNTS);
+  const rec = [];
+  const r = await run(['customers', 'create', '--account', 'idd', '--data', 'email=a@b.co', '--live', '--arm-live', '--confirm', '--accounts-file', s.regPath],
+    {env: {CLAUDE_PLUGIN_DATA: s.dir, CLAUDE_SESSION_ID: 'sess-1'}, stripeFactory: fakeFactory(rec)});
+  assert.equal(r.exitCode, 0);
+  assert.equal(rec[0].apiKey, 'sk_live_idd');
+});
+
+test('invalid --params JSON returns USAGE (exit 2), not a crash', async () => {
+  const s = setup(ACCOUNTS);
+  const r = await run(['customers', 'create', '--account', 'idd', '--params', '{not json', '--accounts-file', s.regPath],
+    {env: {CLAUDE_PLUGIN_DATA: s.dir}, stripeFactory: fakeFactory([])});
+  assert.equal(r.exitCode, 2);
+  assert.match(r.stdout, /Usage error/);
+});

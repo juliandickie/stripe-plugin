@@ -37,14 +37,22 @@ function parseArgs(argv) {
   return a;
 }
 
+const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
 function buildParams(a) {
   if (a.params) return a.params;
   const out = {};
   for (const k of Object.keys(a.data)) {
     const v = a.data[k];
     const m = k.match(/^([^\[]+)\[([^\]]+)\]$/);
-    if (m) { out[m[1]] = out[m[1]] || {}; out[m[1]][m[2]] = v; }
-    else out[k] = v;
+    if (m) {
+      if (DANGEROUS_KEYS.has(m[1]) || DANGEROUS_KEYS.has(m[2])) continue;
+      if (!Object.prototype.hasOwnProperty.call(out, m[1])) out[m[1]] = {};
+      out[m[1]][m[2]] = v;
+    } else {
+      if (DANGEROUS_KEYS.has(k)) continue;
+      out[k] = v;
+    }
   }
   return out;
 }
@@ -53,7 +61,12 @@ async function run(argv, ctx) {
   const env = (ctx && ctx.env) || process.env;
   const stripeFactory = (ctx && ctx.stripeFactory) ||
     ((cfg) => new Stripe(cfg.apiKey, cfg.apiVersion ? {apiVersion: cfg.apiVersion} : {}));
-  const a = parseArgs(argv);
+  let a;
+  try {
+    a = parseArgs(argv);
+  } catch (e) {
+    return {exitCode: EXIT.USAGE, stdout: 'Usage error: ' + e.message};
+  }
   if (!a.resource || !a.action) {
     return {exitCode: EXIT.USAGE, stdout: 'Usage: stripe-x <resource.path> <action> [flags]'};
   }
