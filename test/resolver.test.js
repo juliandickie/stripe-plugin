@@ -39,3 +39,23 @@ test('connect resolves platform key plus stripeAccount', () => {
 test('unknown account throws with available names', () => {
   assert.throws(() => resolveAccount(reg, 'nope', {live: false, env: {}}), /idd, promktg, acme/);
 });
+
+test('resolveAccount falls back to default_account when name is absent', () => {
+  const d = resolveAccount(reg, null, {live: false, env: {}});
+  assert.equal(d.name, 'idd');
+  assert.equal(d.apiKey, 'sk_test_idd');
+});
+
+test('connect live mode uses platform live key (env-sourced) plus stripeAccount', () => {
+  const liveReg = {
+    default_account: 'idd',
+    accounts: {
+      promktg: {type: 'standalone', test_secret_key: 'sk_test_pm', live_secret_key: 'env:PM_LIVE'},
+      acme: {type: 'connect', platform: 'promktg', connected_account: 'acct_ACME'}
+    }
+  };
+  const d = resolveAccount(liveReg, 'acme', {live: true, env: {PM_LIVE: 'sk_live_pm_actual'}});
+  assert.equal(d.apiKey, 'sk_live_pm_actual');
+  assert.equal(d.stripeAccount, 'acct_ACME');
+  assert.equal(d.mode, 'live');
+});

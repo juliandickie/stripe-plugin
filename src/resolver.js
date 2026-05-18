@@ -7,7 +7,7 @@ function sourceSecret(value, env) {
   if (value.startsWith('env:')) {
     const name = value.slice(4);
     const v = env[name];
-    if (!v) throw new Error('Environment variable ' + name + ' is not set (referenced by registry).');
+    if (v == null || v === '') throw new Error('Environment variable ' + name + ' is not set or is empty (referenced by registry).');
     return v;
   }
   return value;
