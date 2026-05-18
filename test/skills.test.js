@@ -25,3 +25,14 @@ test('stripe-api documents the dispatcher grammar and is model-invocable', () =>
   assert.match(f.raw, /--confirm/);
   assert.match(f.raw, /--account/);
 });
+
+test('read-only skills exist and are model-invocable', () => {
+  for (const n of ['stripe-accounts', 'stripe-multi-account', 'stripe-reports']) {
+    const f = fm(__dirname + '/../skills/' + n + '/SKILL.md');
+    assert.match(f.front, new RegExp('name:\\s*' + n));
+  }
+  const acc = fm(__dirname + '/../skills/stripe-accounts/SKILL.md');
+  assert.match(acc.raw, /last 4|mask/i);
+  const ma = fm(__dirname + '/../skills/stripe-multi-account/SKILL.md');
+  assert.match(ma.raw, /--account all/);
+});
