@@ -10,7 +10,14 @@ test('needsScopeReview true when target count exceeds threshold', () => {
 
 test('scopeReview lists every target id', () => {
   const r = scopeReview('subscriptions', 'cancel', ['sub_1', 'sub_2', 'sub_3']);
+  assert.equal(r.kind, 'scope_review_required');
   assert.equal(r.action, 'subscriptions.cancel');
   assert.equal(r.count, 3);
   assert.deepEqual(r.targets, ['sub_1', 'sub_2', 'sub_3']);
+});
+
+test('needsScopeReview fails safe on a malformed threshold', () => {
+  assert.equal(needsScopeReview(3, undefined), true);
+  assert.equal(needsScopeReview(3, NaN), true);
+  assert.equal(needsScopeReview(3, 'x'), true);
 });

@@ -1,6 +1,8 @@
 'use strict';
 
 function needsScopeReview(targetCount, threshold) {
+  // Fail safe: a malformed threshold forces scope review rather than silently skipping it.
+  if (typeof threshold !== 'number' || Number.isNaN(threshold)) return true;
   return targetCount > threshold;
 }
 
