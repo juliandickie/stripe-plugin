@@ -49,4 +49,19 @@ function resolveAccount(reg, name, opts) {
   throw new Error('Account "' + accountName + '" has unknown type "' + acct.type + '".');
 }
 
-module.exports = {resolveAccount, sourceSecret};
+function expandAccounts(reg, spec) {
+  const names = spec === 'all' ? Object.keys(reg.accounts) : String(spec).split(',').map((s) => s.trim()).filter(Boolean);
+  if (names.length === 0) throw new Error('No account specified.');
+  for (const n of names) {
+    if (!reg.accounts[n]) {
+      throw new Error('Unknown account "' + n + '". Available: ' + Object.keys(reg.accounts).join(', '));
+    }
+  }
+  return names;
+}
+
+function isFanOut(names) {
+  return names.length > 1;
+}
+
+module.exports = {resolveAccount, sourceSecret, expandAccounts, isFanOut};

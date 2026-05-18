@@ -59,3 +59,20 @@ test('connect live mode uses platform live key (env-sourced) plus stripeAccount'
   assert.equal(d.stripeAccount, 'acct_ACME');
   assert.equal(d.mode, 'live');
 });
+
+const {expandAccounts, isFanOut} = require('../src/resolver');
+
+test('expandAccounts handles single, comma list, and all', () => {
+  assert.deepEqual(expandAccounts(reg, 'idd'), ['idd']);
+  assert.deepEqual(expandAccounts(reg, 'idd,acme'), ['idd', 'acme']);
+  assert.deepEqual(expandAccounts(reg, 'all').sort(), ['acme', 'idd', 'promktg']);
+});
+
+test('expandAccounts rejects unknown name in list', () => {
+  assert.throws(() => expandAccounts(reg, 'idd,ghost'), /ghost/);
+});
+
+test('isFanOut true for more than one account', () => {
+  assert.equal(isFanOut(['idd']), false);
+  assert.equal(isFanOut(['idd', 'acme']), true);
+});
