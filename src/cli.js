@@ -11,7 +11,7 @@ const {mapStripeError, aggregate} = require('./errors');
 const EXIT = {OK: 0, ERROR: 1, USAGE: 2, CONFIRM: 10, BULK: 11, ARM: 12, FANOUT: 13};
 
 function parseArgs(argv) {
-  const a = {data: {}, expand: [], _: [], all: true};
+  const a = {data: {}, expand: [], _: []};
   for (let i = 0; i < argv.length; i++) {
     const t = argv[i];
     if (t === '--account') a.account = argv[++i];

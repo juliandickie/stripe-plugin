@@ -24,7 +24,7 @@ const ACCOUNTS = {
 function fakeFactory(record) {
   return (cfg) => ({
     customers: {
-      list: () => ({autoPagingToArray: async () => { record.push({apiKey: cfg.apiKey, stripeAccount: cfg.stripeAccount}); return [{id: 'cus_1'}]; }}),
+      list: (p, o) => { record.push({apiKey: cfg.apiKey, stripeAccount: cfg.stripeAccount}); return {autoPagingToArray: async () => [{id: 'cus_1'}]}; },
       create: async (p) => { record.push({apiKey: cfg.apiKey, stripeAccount: cfg.stripeAccount, p: p}); return {id: 'cus_new'}; }
     }
   });
