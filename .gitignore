@@ -1,0 +1,17 @@
+# Local-only per standing convention - design specs, implementation plans,
+# and cloned upstream reference repos (stripe-node, openapi) live here untracked.
+docs/
+
+# Node
+node_modules/
+npm-debug.log*
+
+# Credentials - account secret keys must never be committed
+accounts.json
+*.accounts.json
+.env
+.env.*
+
+# OS noise
+.DS_Store
+Thumbs.db
