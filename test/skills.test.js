@@ -36,3 +36,13 @@ test('read-only skills exist and are model-invocable', () => {
   const ma = fm(__dirname + '/../skills/stripe-multi-account/SKILL.md');
   assert.match(ma.raw, /--account all/);
 });
+
+test('stripe-money-ops is user-only and stripe-webhooks documents the bundled CLI', () => {
+  const mo = fm(__dirname + '/../skills/stripe-money-ops/SKILL.md');
+  assert.match(mo.front, /name:\s*stripe-money-ops/);
+  assert.match(mo.front, /disable-model-invocation:\s*true/);
+  assert.match(mo.raw, /refund|payout|transfer/i);
+  const wh = fm(__dirname + '/../skills/stripe-webhooks/SKILL.md');
+  assert.match(wh.raw, /stripe listen|stripe trigger/);
+  assert.match(wh.raw, /live/);
+});
