@@ -5,6 +5,10 @@ set -euo pipefail
 
 PLUGIN_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VERSION="$(tr -d ' \n' < "${PLUGIN_ROOT}/scripts/stripe-cli-version.txt")"
+if ! printf '%s' "${VERSION}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+  echo "Invalid version in scripts/stripe-cli-version.txt: '${VERSION}'" >&2
+  exit 1
+fi
 DATA_DIR="${CLAUDE_PLUGIN_DATA:-${HOME}/.claude/plugins/data/stripe}"
 DEST="${DATA_DIR}/stripe-cli/${VERSION}"
 BIN="${DEST}/stripe"
@@ -29,16 +33,18 @@ esac
 
 base="https://github.com/stripe/stripe-cli/releases/download/v${VERSION}"
 tarball="stripe_${VERSION}_${os}_${arch}.tar.gz"
-mkdir -p "${DEST}"
 tmp="$(mktemp -d)"
 trap 'rm -rf "${tmp}"' EXIT
 
 echo "Downloading ${tarball}"
-curl -sfL "${base}/${tarball}" -o "${tmp}/${tarball}"
-curl -sfL "${base}/stripe_${VERSION}_checksums.txt" -o "${tmp}/checksums.txt"
+curl -fL --silent --show-error "${base}/${tarball}" -o "${tmp}/${tarball}"
+curl -fL --silent --show-error "${base}/stripe_${VERSION}_checksums.txt" -o "${tmp}/checksums.txt"
 
+# checksums.txt format is "<sha256>  <file>" (two spaces); the single leading
+# space here matches the second of those two and anchors on the exact filename.
 ( cd "${tmp}" && grep " ${tarball}\$" checksums.txt | shasum -a 256 -c - )
 
+mkdir -p "${DEST}"
 tar -xzf "${tmp}/${tarball}" -C "${DEST}" stripe
 chmod +x "${BIN}"
 echo "Provisioned stripe-cli ${VERSION} at ${BIN}"
