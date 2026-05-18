@@ -36,3 +36,8 @@ test('DESTRUCTIVE override list is frozen and contains money movers', () => {
   assert.ok(DESTRUCTIVE.has('refunds.create'));
   assert.ok(DESTRUCTIVE.has('transfers.createReversal'));
 });
+
+test('READ_ACTIONS is frozen', () => {
+  const {READ_ACTIONS} = require('../src/classify');
+  assert.ok(Object.isFrozen(READ_ACTIONS));
+});

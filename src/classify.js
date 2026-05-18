@@ -2,6 +2,7 @@
 
 // Read actions: never gated.
 const READ_ACTIONS = new Set(['list', 'retrieve', 'search', 'listLineItems', 'listPaymentMethods', 'retrievePaymentMethod', 'listComputedUpfrontLineItems']);
+Object.freeze(READ_ACTIONS);
 
 // Money-moving or otherwise irreversible operations that are POSTs and would
 // otherwise read as plain mutating. Keyed by "<resourceSegment>.<action>"
