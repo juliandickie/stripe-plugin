@@ -1,6 +1,6 @@
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
-const {classify, DESTRUCTIVE} = require('../src/classify');
+const {classify, DESTRUCTIVE, READ_ACTIONS} = require('../src/classify');
 
 test('reads are read class', () => {
   assert.equal(classify('customers', 'list'), 'read');
@@ -33,13 +33,14 @@ test('unknown action defaults to mutating (safe minimum)', () => {
 
 test('DESTRUCTIVE override list is frozen and contains money movers', () => {
   assert.ok(Object.isFrozen(DESTRUCTIVE));
-  assert.ok(DESTRUCTIVE.has('refunds.create'));
-  assert.ok(DESTRUCTIVE.has('transfers.createReversal'));
+  assert.throws(() => { 'use strict'; DESTRUCTIVE.push('x.y'); });
+  assert.ok(DESTRUCTIVE.includes('refunds.create'));
+  assert.ok(DESTRUCTIVE.includes('transfers.createReversal'));
 });
 
-test('READ_ACTIONS is frozen', () => {
-  const {READ_ACTIONS} = require('../src/classify');
+test('READ_ACTIONS is frozen and genuinely immutable', () => {
   assert.ok(Object.isFrozen(READ_ACTIONS));
+  assert.throws(() => { 'use strict'; READ_ACTIONS.push('x'); });
 });
 
 test('payment-execution ops are destructive (capture/confirm/pay settle real money irreversibly)', () => {
