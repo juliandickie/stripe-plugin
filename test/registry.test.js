@@ -30,3 +30,12 @@ test('loadRegistry rejects missing accounts object', () => {
   const p = tmpFile({default_account: 'a'});
   assert.throws(() => loadRegistry(p), /accounts/);
 });
+
+test('loadRegistry throws a not-found error on a missing file', () => {
+  assert.throws(() => loadRegistry(path.join(os.tmpdir(), 'definitely-missing-' + Math.random().toString(16).slice(2) + '.json')), /not found/);
+});
+
+test('loadRegistry rejects accounts that is an array', () => {
+  const p = tmpFile({default_account: 'a', accounts: []});
+  assert.throws(() => loadRegistry(p), /accounts/);
+});

@@ -15,7 +15,10 @@ function loadRegistry(p) {
   try {
     raw = fs.readFileSync(p, 'utf8');
   } catch (e) {
-    throw new Error('Accounts registry not found at ' + p + '. Run /stripe:stripe-setup.');
+    if (e.code === 'ENOENT' || e.code === 'ENOTDIR') {
+      throw new Error('Accounts registry not found at ' + p + '. Run /stripe:stripe-setup.');
+    }
+    throw new Error('Cannot read accounts registry at ' + p + ': ' + e.message);
   }
   let reg;
   try {
@@ -23,7 +26,7 @@ function loadRegistry(p) {
   } catch (e) {
     throw new Error('Accounts registry at ' + p + ' is not valid JSON: ' + e.message);
   }
-  if (!reg || typeof reg.accounts !== 'object' || reg.accounts === null) {
+  if (!reg || typeof reg.accounts !== 'object' || reg.accounts === null || Array.isArray(reg.accounts)) {
     throw new Error('Accounts registry must contain an "accounts" object.');
   }
   return reg;
