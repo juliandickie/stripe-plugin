@@ -23,8 +23,6 @@ function resolveMethod(client, resourcePath, action) {
   return {fn: node[action].bind(node), resourceSegment: segs[segs.length - 1]};
 }
 
-const ID_FIRST_ACTIONS = new Set(['retrieve', 'update', 'del', 'delete', 'cancel', 'capture', 'close', 'resume', 'pay', 'finalizeInvoice', 'voidInvoice', 'markUncollectible', 'approve', 'decline', 'reject', 'verify', 'detach', 'reverse']);
-
 function genIdempotencyKey() {
   return 'stripex-' + crypto.randomUUID();
 }
@@ -32,28 +30,27 @@ function genIdempotencyKey() {
 async function callStripe(client, resourcePath, action, req) {
   const r = resolveMethod(client, resourcePath, action);
   const fn = r.fn;
-  const params = req.params || {};
+  // Shallow-copy so injecting expand never mutates the caller's req.params.
+  const params = Object.assign({}, req.params || {});
   if (req.expand && req.expand.length) params.expand = req.expand;
   const options = Object.assign({}, req.options || {});
   if (action === 'create' && !options.idempotencyKey) {
     options.idempotencyKey = genIdempotencyKey();
   }
 
+  // stripe-node's argument convention is uniform: collection operations take
+  // (params, opts); operations on a specific resource take (id, params, opts).
+  // list/search return a pageable. We discriminate instance vs collection by
+  // whether the caller supplied an id (via --id). This is correct for the
+  // entire surface with no per-action allowlist - including id-first actions
+  // like paymentIntents.confirm and singletons like balance.retrieve (no id).
+  const hasId = req.id !== undefined && req.id !== null && req.id !== '';
   let result;
-  if (ID_FIRST_ACTIONS.has(action)) {
-    if (!req.id) throw new Error('Action "' + action + '" requires --id.');
-    if (action === 'del' || action === 'delete') {
-      result = await fn(req.id, options);
-    } else {
-      result = await fn(req.id, params, options);
-    }
-  } else if (action === 'list' || action === 'search') {
+  if (action === 'list' || action === 'search') {
     const ret = fn(params, options);
-    if (req.all) {
-      result = await ret.autoPagingToArray({limit: req.limit || 10000});
-    } else {
-      result = await ret;
-    }
+    result = req.all ? await ret.autoPagingToArray({limit: req.limit || 10000}) : await ret;
+  } else if (hasId) {
+    result = await fn(req.id, params, options);
   } else {
     result = await fn(params, options);
   }
