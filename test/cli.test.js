@@ -124,3 +124,22 @@ test('invalid --params JSON returns USAGE (exit 2), not a crash', async () => {
   assert.equal(r.exitCode, 2);
   assert.match(r.stdout, /Usage error/);
 });
+
+test('help lists operations for a resource from the api-map (no registry, no network)', async () => {
+  const r = await run(['help', 'customers'], {env: {}, stripeFactory: fakeFactory([])});
+  assert.equal(r.exitCode, 0);
+  assert.match(r.stdout, /customers\.create\s+\[POST\]/);
+  assert.match(r.stdout, /customers\.list\s+\[GET\]/);
+});
+
+test('bare help prints usage and the discovery hint', async () => {
+  const r = await run(['help'], {env: {}, stripeFactory: fakeFactory([])});
+  assert.equal(r.exitCode, 0);
+  assert.match(r.stdout, /stripe-x help <resource\.path>/);
+});
+
+test('help for an unknown resource suggests nearby and does not crash or confirm', async () => {
+  const r = await run(['help', 'custmoers'], {env: {}, stripeFactory: fakeFactory([])});
+  assert.equal(r.exitCode, 0);
+  assert.doesNotMatch(r.stdout, /CONFIRMATION REQUIRED/);
+});

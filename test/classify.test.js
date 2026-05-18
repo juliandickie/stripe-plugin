@@ -41,3 +41,9 @@ test('READ_ACTIONS is frozen', () => {
   const {READ_ACTIONS} = require('../src/classify');
   assert.ok(Object.isFrozen(READ_ACTIONS));
 });
+
+test('capture and invoices.pay are mutating (documented residual; still --confirm gated, no IRREVERSIBLE label)', () => {
+  assert.equal(classify('paymentIntents', 'capture'), 'mutating');
+  assert.equal(classify('charges', 'capture'), 'mutating');
+  assert.equal(classify('invoices', 'pay'), 'mutating');
+});

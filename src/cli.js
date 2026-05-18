@@ -67,6 +67,29 @@ async function run(argv, ctx) {
   } catch (e) {
     return {exitCode: EXIT.USAGE, stdout: 'Usage error: ' + e.message};
   }
+  if (a.resource === 'help') {
+    const fs = require('node:fs');
+    const path = require('node:path');
+    const {camelizePath} = require('./dispatch');
+    let apiMap = {};
+    try {
+      apiMap = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'assets', 'stripe-api-map.json'), 'utf8'));
+    } catch (e) {
+      return {exitCode: EXIT.ERROR, stdout: JSON.stringify({error: {message: 'api-map not found: ' + e.message}})};
+    }
+    const query = a.action;
+    if (!query) {
+      return {exitCode: EXIT.OK, stdout: 'Usage: stripe-x <resource.path> <action> [flags]\nDiscover operations: stripe-x help <resource.path>  (example: stripe-x help customers)'};
+    }
+    const camel = camelizePath(query);
+    const matches = Object.keys(apiMap).filter((k) => k === camel || k.indexOf(camel + '.') === 0 || apiMap[k].resource === camel).sort();
+    if (matches.length === 0) {
+      const head = camel.split('.')[0];
+      const near = Object.keys(apiMap).filter((k) => k.indexOf(head) === 0).slice(0, 12);
+      return {exitCode: EXIT.OK, stdout: 'No operations found for "' + query + '". Nearby: ' + (near.join(', ') || '(none)')};
+    }
+    return {exitCode: EXIT.OK, stdout: 'Operations for "' + query + '":\n' + matches.map((k) => k + '  [' + apiMap[k].httpMethod + ']').join('\n')};
+  }
   if (!a.resource || !a.action) {
     return {exitCode: EXIT.USAGE, stdout: 'Usage: stripe-x <resource.path> <action> [flags]'};
   }
