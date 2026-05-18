@@ -54,3 +54,16 @@ test('aggregate of an empty list is the documented degenerate (ok true, 0 of 0)'
   assert.equal(a.failed, 0);
   assert.equal(a.summary, '0 of 0 succeeded');
 });
+
+test('mapStripeError scrubs secret keys from message', () => {
+  const e = Object.assign(new Error('Invalid API Key provided: sk_live_ABCDEF1234567890zzz'), {type: 'StripeAuthenticationError'});
+  const m = mapStripeError(e);
+  assert.ok(!/sk_live_ABCDEF1234567890zzz/.test(m.message));
+  assert.match(m.message, /sk_live_\*\*\*/);
+});
+
+test('aggregate is robust to a result missing account/error', () => {
+  const a = aggregate([{ok: true}, {ok: false}]);
+  assert.equal(a.ok, false);
+  assert.match(a.summary, /\(unknown\) failed/);
+});
