@@ -188,6 +188,18 @@ test('--arm-live across a fan-out is a usage error', async () => {
   assert.match(r.stdout, /single --account/);
 });
 
+test('--arm-live on a read arms and exits uniformly (no read/write distinction)', async () => {
+  const s = setup(ACCOUNTS);
+  const rec = [];
+  const r = await run(['customers', 'list', '--account', 'idd', '--live', '--arm-live',
+    '--accounts-file', s.regPath],
+    {env: {CLAUDE_PLUGIN_DATA: s.dir, CLAUDE_SESSION_ID: 'sess-armread', IDD_TEST: 'sk_test_idd'},
+     stripeFactory: fakeFactory(rec), opRunner: OP});
+  assert.equal(r.exitCode, 14);
+  assert.match(r.stdout, /ARMED/);
+  assert.equal(rec.length, 0);
+});
+
 test('invalid --params JSON returns USAGE (exit 2), not a crash', async () => {
   const s = setup(ACCOUNTS);
   const r = await run(['customers', 'create', '--account', 'idd', '--params', '{not json', '--accounts-file', s.regPath],

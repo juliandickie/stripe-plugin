@@ -117,9 +117,10 @@ async function run(argv, ctx) {
 
   // Arming is its own invocation. It never executes, even with --confirm,
   // so live execution always costs two separate tool calls and therefore
-  // two separate permission prompts. Handled before the read/write split
-  // so that --arm-live on a read is a clear usage error rather than a
-  // silent no-op.
+  // two separate permission prompts. Resolved before the fan-out refusal
+  // and before the read/write split, so --arm-live always lands here and
+  // reports what it did, instead of being silently ignored on a read or
+  // masked by the fan-out refusal on a write.
   if (a.armLive) {
     if (!a.live) {
       return {exitCode: EXIT.USAGE,
