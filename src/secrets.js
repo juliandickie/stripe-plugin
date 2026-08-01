@@ -45,7 +45,10 @@ function _readFromOp(ref, opts) {
 
   const runner = opts.opRunner || _defaultOpRunner;
   const env = opts.env || {};
-  const seconds = parseInt(env.CLAUDE_PLUGIN_OPTION_OP_TIMEOUT || '60', 10);
+  // A non-numeric override must not reach spawnSync as NaN, which would
+  // surface as a raw Node range error instead of this module's messages.
+  const parsedTimeout = parseInt(env.CLAUDE_PLUGIN_OPTION_OP_TIMEOUT || '60', 10);
+  const seconds = Number.isFinite(parsedTimeout) && parsedTimeout > 0 ? parsedTimeout : 60;
   const argv = ['read', ref];
   if (opAccount) argv.push('--account', opAccount);
 
@@ -98,8 +101,12 @@ function resolveSecretRef(ref, opts) {
   if (ref.startsWith(OP_PREFIX)) {
     return _readFromOp(ref, o);
   }
-  throw new Error('Unsupported secret reference "' + ref
-    + '". Use op://Vault/Item/field or env:NAME.');
+  // Deliberately does NOT echo `ref`. Reaching this line means `ref` is
+  // neither an op:// nor an env: reference, and the commonest cause is a
+  // raw Stripe key pasted into the registry, so `ref` IS the secret. The
+  // account and field names from assertRefAcceptable are the actionable
+  // detail; the value never is.
+  throw new Error('Unsupported secret reference. Use op://Vault/Item/field or env:NAME.');
 }
 
 module.exports = {assertRefAcceptable, resolveSecretRef, _resetCache};

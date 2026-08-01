@@ -106,3 +106,29 @@ test('a generic op failure surfaces stderr and never falls back', () => {
 test('an unknown prefix raises rather than being treated as a literal', () => {
   assert.throws(() => resolveSecretRef('sk_live_raw', {env: {}}), /Unsupported secret reference/);
 });
+
+test('the unsupported-reference error never echoes the value', () => {
+  // Reaching that branch usually means a raw key was pasted into the
+  // registry, so the rejected value is itself the secret.
+  try {
+    resolveSecretRef('sk_live_LEAKME', {env: {}});
+    assert.fail('expected a throw');
+  } catch (e) {
+    assert.doesNotMatch(e.message, /sk_live_LEAKME/);
+  }
+});
+
+test('op returning an empty value raises', () => {
+  _resetCache();
+  const runner = () => ({status: 0, stdout: '\n', stderr: ''});
+  assert.throws(() => resolveSecretRef('op://V/I/f', {env: {}, opRunner: runner}), /empty value/);
+});
+
+test('a non-numeric op timeout falls back to the default rather than NaN', () => {
+  _resetCache();
+  let seen = null;
+  const runner = (argv, opts) => { seen = opts; return {status: 0, stdout: 'k', stderr: ''}; };
+  resolveSecretRef('op://V/I/f',
+    {env: {CLAUDE_PLUGIN_OPTION_OP_TIMEOUT: 'banana'}, opRunner: runner});
+  assert.equal(seen.timeout, 60000);
+});
