@@ -1,6 +1,6 @@
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
-const {decide} = require('../hooks/pretooluse-stripe-guard');
+const {decide, VALUE_FLAGS, BOOLEAN_FLAGS} = require('../hooks/pretooluse-stripe-guard');
 
 function ev(command, permission_mode, overrides) {
   return Object.assign({
@@ -187,4 +187,56 @@ test('the single-read defer path still works with real flags', () => {
   assert.equal(decide(ev('stripe-x charges retrieve --id ch_1 --expand data', 'auto')).permissionDecision, 'defer');
   assert.equal(decide(ev('stripe-x paymentIntents list --limit 5', 'auto')).permissionDecision, 'defer');
   assert.equal(decide(ev('stripe-x customers list --account idd --table', 'auto')).permissionDecision, 'defer');
+});
+
+test('shell redirection cannot shift a destructive call into the read slots', () => {
+  for (const op of ['>', '>>', '2>', '<', '<<<', '&>']) {
+    const c = 'stripe-x ' + op + ' list accounts del --id acct_123 --confirm';
+    assert.equal(decide(ev(c, 'auto')).permissionDecision, 'ask', c);
+  }
+});
+
+test('shell constructs the guard never enumerated still fail closed', () => {
+  for (const c of [
+    'stripe-x $(id) list accounts del --id x',
+    'stripe-x {a,b} list accounts del --id x',
+    'stripe-x *.log list accounts del --id x',
+    'stripe-x ~/x list accounts del --id x',
+    'stripe-x <(cat f) list accounts del --id x'
+  ]) {
+    assert.equal(decide(ev(c, 'auto')).permissionDecision, 'ask', c);
+  }
+});
+
+test('a resource or action that is not an identifier is never classified', () => {
+  assert.equal(decide(ev('stripe-x 123 list', 'auto')).permissionDecision, 'ask');
+  assert.equal(decide(ev('stripe-x customers 9lives', 'auto')).permissionDecision, 'ask');
+});
+
+test('genuine reads with real flags still defer', () => {
+  for (const c of [
+    'stripe-x customers list --account idd',
+    'stripe-x --account idd customers list',
+    'stripe-x charges retrieve --id ch_1 --expand data',
+    'stripe-x paymentIntents list --limit 5',
+    'stripe-x customers list --account idd --table',
+    'stripe-x customers list --data email=a@b.co',
+    'stripe-x help customers'
+  ]) {
+    assert.equal(decide(ev(c, 'auto')).permissionDecision, 'defer', c);
+  }
+});
+
+test('the guard flag sets stay in sync with the engine parseArgs', () => {
+  const fs = require('node:fs');
+  const src = fs.readFileSync(__dirname + '/../src/cli.js', 'utf8');
+  const parsed = new Set((src.match(/t === '(--[a-z-]+)'/g) || [])
+    .map((m) => m.replace(/^t === '/, '').replace(/'$/, '')));
+  const guarded = new Set([...VALUE_FLAGS, ...BOOLEAN_FLAGS]);
+  for (const f of parsed) {
+    assert.ok(guarded.has(f), 'parseArgs knows ' + f + ' but the guard does not');
+  }
+  for (const f of guarded) {
+    assert.ok(parsed.has(f), 'the guard knows ' + f + ' but parseArgs does not');
+  }
 });
