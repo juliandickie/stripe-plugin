@@ -37,6 +37,7 @@
 // currently correct and one that is structurally correct.
 const {classify} = require('../src/classify');
 const {camelizePath} = require('../src/dispatch');
+const {issue: issueVet} = require('../src/vetting');
 
 const ENGINE = 'stripe-x';
 
@@ -90,6 +91,17 @@ function normalize(cmd) {
   return cmd.replace(/['"\\$]/g, '').toLowerCase();
 }
 
+// Did this hook input mention the engine at all? Reuses normalize() rather
+// than re-implementing the substring check, so this and _decide's own
+// mention gate (the first real test _decide runs once it has a command
+// string) can never disagree. decide() uses this to gate vetting-token
+// issuance, which must happen outside _decide - see decide() below.
+function mentionsEngine(input) {
+  const cmd = input && input.tool_input && input.tool_input.command;
+  if (typeof cmd !== 'string' || cmd.length === 0) return false;
+  return normalize(cmd).indexOf(ENGINE) !== -1;
+}
+
 function isEngineToken(t) {
   const s = t.toLowerCase();
   return s === ENGINE || s.endsWith('/' + ENGINE);
@@ -130,9 +142,9 @@ function _decide(input) {
   }
 
   if (!SIMPLE_CHARS.test(cmd)) {
-    return ask('This Stripe command contains shell syntax that cannot be verified, so it '
-      + 'is not safe to run unattended while Claude Code is in a non-prompting permission '
-      + 'mode. Confirm before running.');
+    return deny('This Stripe command contains shell syntax that cannot be verified, so it '
+      + 'cannot be shown to be free of a live operation. Relaunch Claude Code in default '
+      + 'permission mode, or rewrite the command without shell quoting or expansion.');
   }
 
   const tokens = cmd.trim().split(/\s+/);
@@ -178,13 +190,40 @@ function _decide(input) {
     + 'permission mode. Confirm before running.');
 }
 
-function decide(input) {
+function decide(input, env) {
+  const environment = env || process.env;
   // A throwing guard must never fail open.
+  let result;
   try {
-    return _decide(input);
+    result = _decide(input);
   } catch (e) {
-    return deny('Stripe call refused: the permission guard could not evaluate this command.');
+    result = deny('Stripe call refused: the permission guard could not evaluate this command.');
   }
+
+  // A recognised stripe-x invocation that is not denied - `defer` (prompting
+  // modes, simple reads) or an `ask` the user goes on to approve - must
+  // still be able to run a live operation, and src/vetting.js refuses a
+  // live call with no token. Only `deny` withholds one. This happens here,
+  // after the decision is computed, never inside _decide, so _decide stays
+  // a pure classifier and every side effect of this module lives in one
+  // place.
+  if (result.permissionDecision !== 'deny' && environment.CLAUDE_PLUGIN_DATA
+      && mentionsEngine(input)) {
+    // Require CLAUDE_PLUGIN_DATA before writing: with it unset there is no
+    // coordinated location for the token, and writing to a relative path
+    // would litter the repository instead. The decision computed above is
+    // already final and correct on its own; issuing a token is an
+    // additional, independent guarantee for src/vetting.js, not part of
+    // that decision, so a write failure here is scoped to its own
+    // try/catch and is not allowed to alter or throw past the decision.
+    try {
+      issueVet(environment);
+    } catch (e) {
+      // Deliberately empty: see comment above.
+    }
+  }
+
+  return result;
 }
 
 function emit(d) {
@@ -200,9 +239,9 @@ if (require.main === module) {
   process.stdin.on('end', () => {
     let input = null;
     try { input = JSON.parse(raw); } catch (e) { input = null; }
-    emit(decide(input));
+    emit(decide(input, process.env));
     process.exit(0);
   });
 }
 
-module.exports = {decide, VALUE_FLAGS, BOOLEAN_FLAGS};
+module.exports = {decide, mentionsEngine, VALUE_FLAGS, BOOLEAN_FLAGS};

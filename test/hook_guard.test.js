@@ -1,6 +1,10 @@
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
-const {decide, VALUE_FLAGS, BOOLEAN_FLAGS} = require('../hooks/pretooluse-stripe-guard');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const {decide, mentionsEngine, VALUE_FLAGS, BOOLEAN_FLAGS} = require('../hooks/pretooluse-stripe-guard');
+const {isVetted} = require('../src/vetting');
 
 function ev(command, permission_mode, overrides) {
   return Object.assign({
@@ -63,13 +67,17 @@ test('shell ambiguity with a live flag still denies', () => {
   }
 });
 
-test('shell ambiguity without a live flag asks rather than allows', () => {
+test('shell ambiguity without a live flag denies rather than allows', () => {
+  // None of these are provably simple - SIMPLE_CHARS fails on &, $, (, ), ` -
+  // so each now denies outright instead of asking: unverifiable shell syntax
+  // on a command that mentions the engine cannot be shown free of a live
+  // operation, so it refuses rather than prompting.
   for (const c of [
     'stripe-x customers list && rm -rf /',
     'stripe-x refunds create $(cat flags.txt)',
     'stripe-x refunds create `cat flags.txt`'
   ]) {
-    assert.equal(decide(ev(c, 'auto')).permissionDecision, 'ask', c);
+    assert.equal(decide(ev(c, 'auto')).permissionDecision, 'deny', c);
   }
 });
 
@@ -98,13 +106,25 @@ test('a quoted engine token cannot smuggle a live call past the guard', () => {
   }
 });
 
-test('a quoted engine token on a read cannot be proven simple, so it asks', () => {
-  assert.equal(decide(ev('"stripe-x" customers list --account idd', 'auto')).permissionDecision, 'ask');
+test('a quoted engine token on a read cannot be proven simple, so it denies', () => {
+  assert.equal(decide(ev('"stripe-x" customers list --account idd', 'auto')).permissionDecision, 'deny');
 });
 
-test('mentioning the engine while unlocatable fails closed', () => {
-  // Pre-gate matches on the substring, but no token resolves to the engine.
+test('a substring engine mention with --live denies at the live check, not the unlocatable branch', () => {
+  // "stripe-x" is a substring of "my-stripe-xylophone", so the mention gate
+  // matches - but this command also contains a literal "--live", so it is
+  // denied at the live check (the very next thing _decide tests) and never
+  // reaches the token-resolution branch below. This case used to be
+  // asserted under a name claiming to exercise that later branch; it never
+  // did, because the live check always short-circuits first.
   assert.equal(decide(ev('echo my-stripe-xylophone --live', 'auto')).permissionDecision, 'deny');
+});
+
+test('a substring engine mention with no live flag genuinely reaches the unlocatable branch and asks', () => {
+  // Same substring match, no "--live" this time, so nothing short-circuits
+  // before token resolution: no token in the command equals "stripe-x" or
+  // ends with "/stripe-x", so the guard asks rather than guessing.
+  assert.equal(decide(ev('echo my-stripe-xylophone list', 'auto')).permissionDecision, 'ask');
 });
 
 test('a value-taking flag does not shift the positional parse', () => {
@@ -156,8 +176,9 @@ test('defer is reachable only for a provably simple read', () => {
   assert.equal(decide(ev('stripe-x customers list --account idd', 'auto')).permissionDecision, 'defer');
   assert.equal(decide(ev('stripe-x --account idd customers list', 'auto')).permissionDecision, 'defer');
   assert.equal(decide(ev('stripe-x help customers', 'auto')).permissionDecision, 'defer');
-  // Same read, but quoted, so simplicity cannot be proven.
-  assert.equal(decide(ev('"stripe-x" customers list', 'auto')).permissionDecision, 'ask');
+  // Same read, but quoted, so simplicity cannot be proven - and unprovable
+  // simplicity on a command that mentions the engine now denies, not defers.
+  assert.equal(decide(ev('"stripe-x" customers list', 'auto')).permissionDecision, 'deny');
 });
 
 test('a chained second engine invocation is never classified by the first', () => {
@@ -192,7 +213,10 @@ test('the single-read defer path still works with real flags', () => {
 test('shell redirection cannot shift a destructive call into the read slots', () => {
   for (const op of ['>', '>>', '2>', '<', '<<<', '&>']) {
     const c = 'stripe-x ' + op + ' list accounts del --id acct_123 --confirm';
-    assert.equal(decide(ev(c, 'auto')).permissionDecision, 'ask', c);
+    // Redirection characters fall outside SIMPLE_CHARS, so this now denies
+    // rather than asking - still never reaches defer, the invariant this
+    // test exists to protect.
+    assert.equal(decide(ev(c, 'auto')).permissionDecision, 'deny', c);
   }
 });
 
@@ -204,7 +228,9 @@ test('shell constructs the guard never enumerated still fail closed', () => {
     'stripe-x ~/x list accounts del --id x',
     'stripe-x <(cat f) list accounts del --id x'
   ]) {
-    assert.equal(decide(ev(c, 'auto')).permissionDecision, 'ask', c);
+    // None of these are in SIMPLE_CHARS, so each now denies outright - an
+    // even stronger fail-closed than the ask these used to get.
+    assert.equal(decide(ev(c, 'auto')).permissionDecision, 'deny', c);
   }
 });
 
@@ -239,4 +265,123 @@ test('the guard flag sets stay in sync with the engine parseArgs', () => {
   for (const f of guarded) {
     assert.ok(parsed.has(f), 'the guard knows ' + f + ' but parseArgs does not');
   }
+});
+
+test('command substitution that reconstructs --live at shell-execution time is denied (bypass 9b)', () => {
+  // normalize() strips quotes, backslashes and $, but not the parentheses or
+  // backticks that make substitution work, so the text the live check sees
+  // is --li(echo v)e (or --li<backtick>echo v<backtick>e) - never the literal
+  // substring "--live". Real bash executes `echo v` and splices the result
+  // in, so this is a live call the text-only live check cannot see.
+  // SIMPLE_CHARS catches the parentheses/backtick and now denies rather
+  // than asking, which is the fix this test exists to prove.
+  for (const c of [
+    'stripe-x refunds create --li$(echo v)e --confirm',
+    'stripe-x refunds create --li`echo v`e --confirm'
+  ]) {
+    assert.equal(decide(ev(c, 'auto')).permissionDecision, 'deny', c);
+  }
+});
+
+// --- Process entry point (Change 3) ---
+//
+// Every test above calls decide() in-process. The actual contract Claude
+// Code drives is the stdin-to-stdout wrapper guarded by
+// `require.main === module`, which had zero coverage until now.
+
+test('the hook process entry point emits a valid decision on stdin', () => {
+  const {execFileSync} = require('node:child_process');
+  const payload = JSON.stringify({
+    hook_event_name: 'PreToolUse', tool_name: 'Bash', permission_mode: 'auto',
+    tool_input: {command: 'stripe-x refunds create --live --confirm'}
+  });
+  const out = execFileSync('node', [__dirname + '/../hooks/pretooluse-stripe-guard.js'],
+    {input: payload, encoding: 'utf8', env: {PATH: process.env.PATH}});
+  const parsed = JSON.parse(out);
+  assert.equal(parsed.hookSpecificOutput.hookEventName, 'PreToolUse');
+  assert.equal(parsed.hookSpecificOutput.permissionDecision, 'deny');
+});
+
+test('the hook process entry point defers on malformed stdin', () => {
+  const {execFileSync} = require('node:child_process');
+  const out = execFileSync('node', [__dirname + '/../hooks/pretooluse-stripe-guard.js'],
+    {input: 'not json', encoding: 'utf8', env: {PATH: process.env.PATH}});
+  assert.equal(JSON.parse(out).hookSpecificOutput.permissionDecision, 'defer');
+});
+
+// --- Vetting token issuance (Changes 1 and 5) ---
+//
+// The guard now issues a vetting token (src/vetting.js's issue()) whenever
+// it recognises a stripe-x invocation and does not deny it, so a `defer`
+// or an approved `ask` can still run a live operation, which the engine
+// refuses without a token (src/vetting.js, exit 15). These tests exercise
+// decide()'s optional second `env` parameter directly, pointing
+// CLAUDE_PLUGIN_DATA at a scratch temp directory rather than the real
+// plugin data directory, and use isVetted() from src/vetting.js to assert
+// on the result. Mirrors the dataDir() helper in test/vetting.test.js.
+
+function dataDir() {
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'hook-guard-vet-'));
+}
+
+test('mentionsEngine agrees with the mention gate it mirrors inside decide()', () => {
+  assert.equal(mentionsEngine(ev('stripe-x customers list', 'auto')), true);
+  assert.equal(mentionsEngine(ev('"STRIPE-X" customers list', 'auto')), true);
+  assert.equal(mentionsEngine(ev('ls -la', 'auto')), false);
+  assert.equal(mentionsEngine(null), false);
+  assert.equal(mentionsEngine({}), false);
+  assert.equal(mentionsEngine(ev(123, 'auto')), false);
+});
+
+test('a deny decision issues no token', () => {
+  const env = {CLAUDE_PLUGIN_DATA: dataDir(), CLAUDE_SESSION_ID: 's'};
+  const d = decide(ev('stripe-x refunds create --live --confirm', 'auto'), env);
+  assert.equal(d.permissionDecision, 'deny');
+  assert.equal(isVetted(env), false);
+});
+
+test('a defer decision on a simple read issues a token', () => {
+  const env = {CLAUDE_PLUGIN_DATA: dataDir(), CLAUDE_SESSION_ID: 's'};
+  const d = decide(ev('stripe-x customers list --account idd', 'auto'), env);
+  assert.equal(d.permissionDecision, 'defer');
+  assert.equal(isVetted(env), true);
+});
+
+test('an ask decision issues a token', () => {
+  const env = {CLAUDE_PLUGIN_DATA: dataDir(), CLAUDE_SESSION_ID: 's'};
+  const d = decide(ev('stripe-x customers create --account idd --confirm', 'auto'), env);
+  assert.equal(d.permissionDecision, 'ask');
+  assert.equal(isVetted(env), true);
+});
+
+test('a prompting-mode defer issues a token', () => {
+  const env = {CLAUDE_PLUGIN_DATA: dataDir(), CLAUDE_SESSION_ID: 's'};
+  const d = decide(ev('stripe-x refunds create --live --confirm', 'default'), env);
+  assert.equal(d.permissionDecision, 'defer');
+  assert.equal(isVetted(env), true);
+});
+
+test('a command that never mentions the engine issues no token', () => {
+  const env = {CLAUDE_PLUGIN_DATA: dataDir(), CLAUDE_SESSION_ID: 's'};
+  const d = decide(ev('ls -la', 'auto'), env);
+  assert.equal(d.permissionDecision, 'defer');
+  assert.equal(isVetted(env), false);
+});
+
+test('issuance is skipped when CLAUDE_PLUGIN_DATA is absent', () => {
+  const env = {CLAUDE_SESSION_ID: 's'};
+  const d = decide(ev('stripe-x customers list --account idd', 'auto'), env);
+  assert.equal(d.permissionDecision, 'defer');
+  assert.equal(isVetted(env), false);
+});
+
+test('a failure to write a token does not change or throw past the decision', () => {
+  const dir = dataDir();
+  // Block issue()'s mkdirSync: a regular file sitting where it needs to
+  // create a directory makes the write throw ENOTDIR.
+  fs.writeFileSync(path.join(dir, 'stripe-x'), 'not a directory');
+  const env = {CLAUDE_PLUGIN_DATA: dir, CLAUDE_SESSION_ID: 's'};
+  const d = decide(ev('stripe-x customers list --account idd', 'auto'), env);
+  assert.equal(d.permissionDecision, 'defer');
+  assert.equal(isVetted(env), false);
 });
