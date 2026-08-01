@@ -71,6 +71,35 @@ test('an absolute path to the engine is still matched', () => {
   assert.equal(d.permissionDecision, 'deny');
 });
 
+test('a nested shell invocation cannot smuggle a live call past the guard', () => {
+  for (const c of [
+    'bash -c "stripe-x refunds create --live --confirm"',
+    "sh -c 'stripe-x refunds create --live --confirm'",
+    'zsh -c "stripe-x refunds create --live"'
+  ]) {
+    assert.equal(decide(ev(c, 'auto')).permissionDecision, 'deny', c);
+  }
+});
+
+test('a quoted engine token cannot smuggle a live call past the guard', () => {
+  for (const c of [
+    '"stripe-x" refunds create --live',
+    "'stripe-x' refunds create --live --confirm",
+    '"stripe-x" refunds create --live --confirm'
+  ]) {
+    assert.equal(decide(ev(c, 'auto')).permissionDecision, 'deny', c);
+  }
+});
+
+test('a quoted engine token on a read still classifies rather than failing closed', () => {
+  assert.equal(decide(ev('"stripe-x" customers list --account idd', 'auto')).permissionDecision, 'defer');
+});
+
+test('mentioning the engine while unlocatable fails closed', () => {
+  // Pre-gate matches on the substring, but no token resolves to the engine.
+  assert.equal(decide(ev('echo my-stripe-xylophone --live', 'auto')).permissionDecision, 'deny');
+});
+
 test('a value-taking flag does not shift the positional parse', () => {
   // --account takes a value; "idd" must not be mistaken for the action.
   assert.equal(decide(ev('stripe-x --account idd customers list', 'auto')).permissionDecision, 'defer');

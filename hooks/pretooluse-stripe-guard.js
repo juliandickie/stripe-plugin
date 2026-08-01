@@ -20,15 +20,34 @@ const VALUE_FLAGS = new Set(['--account', '--id', '--params', '--data', '--expan
 // Constructs that could hide a --live flag from a naive token scan. This is
 // a pattern match over the untrusted shell-command string, looking for the
 // literal word "eval" as a shell token (plus command substitution, chaining,
-// and backticks); it never calls JavaScript's eval() on anything.
-const AMBIGUOUS = /(\$\(|`|(^|\s)eval(\s|$)|;|&&|\|\|)/;
+// and backticks); it never calls JavaScript's eval() on anything. A nested
+// shell invocation (bash/sh/zsh -c "...") can hide a flag inside its command
+// string exactly the same way command substitution can - the flag never
+// appears as a token of the outer command at all - so it is denied outright
+// alongside the other constructs rather than trusted to a token scan.
+const AMBIGUOUS = /(\$\(|`|(^|\s)eval(\s|$)|;|&&|\|\||(^|\s)(bash|sh|zsh)\s+-c(\s|$))/;
 
 function defer() { return {permissionDecision: 'defer'}; }
 function deny(reason) { return {permissionDecision: 'deny', permissionDecisionReason: reason}; }
 function ask(reason) { return {permissionDecision: 'ask', permissionDecisionReason: reason}; }
 
+// A quoting shell glues a leading and/or trailing quote character onto a
+// token before this hook ever sees the command split on whitespace
+// (`"stripe-x"`, or just `"stripe-x` when the closing quote lands on a
+// later word instead). Stripping one layer of surrounding quotes before
+// comparing means the engine token and the --live flag are still recognised
+// when quoted, rather than silently failing to match.
+function stripQuotes(t) {
+  return t.replace(/^['"]/, '').replace(/['"]$/, '');
+}
+
 function isEngineToken(t) {
-  return t === 'stripe-x' || t.endsWith('/stripe-x');
+  const s = stripQuotes(t);
+  return s === 'stripe-x' || s.endsWith('/stripe-x');
+}
+
+function isLiveFlag(t) {
+  return stripQuotes(t) === '--live';
 }
 
 function _decide(input) {
@@ -52,20 +71,32 @@ function _decide(input) {
   if (PROMPTING.has(mode)) return defer();
 
   // From here the call at least mentions the engine, in a mode that will
-  // not prompt on its own. Every remaining uncertainty resolves to the most
-  // restrictive outcome, checked before classification.
+  // not prompt on its own. This is the fail-closed boundary: every branch
+  // below must resolve to deny or ask. Past this point, defer is reachable
+  // only by successfully locating the engine token and that locate leading
+  // to a read classification - never merely because a check above did not
+  // fire. That "didn't match, so defer" shape is exactly how a quoted
+  // engine token and a nested-shell invocation each bypassed this guard
+  // before: the strict token match silently failed to locate the engine,
+  // and the code treated "not located" as "not our concern" instead of
+  // "cannot rule out danger".
   if (AMBIGUOUS.test(cmd)) {
     return deny('Stripe call refused: the command contains shell constructs that could '
       + 'conceal flags, and Claude Code is in a non-prompting permission mode.');
   }
 
   const tokens = cmd.trim().split(/\s+/);
-  if (!tokens.some(isEngineToken)) return defer();
-
   const i = tokens.findIndex(isEngineToken);
+  if (i === -1) {
+    // The raw command mentions "stripe-x" (the pre-gate above matched) but
+    // no token, even after stripping quotes, resolves to the engine itself.
+    // Fail closed rather than assuming the mention is incidental.
+    return deny('Stripe call refused: the engine could not be located as a distinct '
+      + 'token in the command, and Claude Code is in a non-prompting permission mode.');
+  }
   const rest = tokens.slice(i + 1);
 
-  if (rest.includes('--live')) {
+  if (rest.some(isLiveFlag)) {
     return deny('Live Stripe calls are refused while Claude Code is in a non-prompting '
       + 'permission mode. Relaunch in default mode to run this.');
   }
