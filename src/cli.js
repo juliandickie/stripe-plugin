@@ -164,10 +164,18 @@ async function run(argv, ctx) {
     options: a.idempotencyKey ? {idempotencyKey: a.idempotencyKey} : {}};
 
   if (!isFanOut(names) && cls !== 'read') {
-    const d = resolveAccount(reg, names[0], {live: !!a.live, env: env, opRunner: opRunner});
+    // The account name and mode are both known from the registry and the
+    // --live flag alone - names[0] is already validated by expandAccounts
+    // above, and mode is a pure function of --live. Neither needs the
+    // secret, so resolveAccount (and the `op read` / biometric prompt a
+    // live key costs) is deliberately deferred past every check below that
+    // can refuse or preview without it. It is called once, below, only on
+    // the path that actually constructs a Stripe client.
+    const accountName = names[0];
+    const mode = a.live ? 'live' : 'test';
     if (a.live && (cls === 'mutating' || cls === 'destructive')) {
-      if (!isArmed(d.name, env)) {
-        return {exitCode: EXIT.ARM, stdout: 'REFUSED: live mode not armed for "' + d.name + '". Re-run with --arm-live to arm this session.'};
+      if (!isArmed(accountName, env)) {
+        return {exitCode: EXIT.ARM, stdout: 'REFUSED: live mode not armed for "' + accountName + '". Re-run with --arm-live to arm this session.'};
       }
       if (!isVetted(env)) {
         return {exitCode: EXIT.UNVETTED,
@@ -188,7 +196,7 @@ async function run(argv, ctx) {
     const isBulk = !!(a.bulkIds && a.bulkIds.length);
     if (!a.confirm) {
       const preview = 'CONFIRMATION REQUIRED\n'
-        + 'account: ' + d.name + '\nmode: ' + d.mode.toUpperCase() + '\n'
+        + 'account: ' + accountName + '\nmode: ' + mode.toUpperCase() + '\n'
         + 'operation: ' + a.resource + '.' + a.action + '\nclass: ' + cls + '\n'
         + (isBulk
           ? 'bulk: ' + a.bulkIds.length + ' targets\ntargets: ' + a.bulkIds.join(',') + '\n'
@@ -198,6 +206,9 @@ async function run(argv, ctx) {
         + 'Re-run with --confirm to execute.';
       return {exitCode: EXIT.CONFIRM, stdout: preview};
     }
+    // Every refusal and the preview above return before this line, so the
+    // secret is resolved only once execution is actually about to happen.
+    const d = resolveAccount(reg, accountName, {live: !!a.live, env: env, opRunner: opRunner});
     if (isBulk) {
       const client = stripeFactory({apiKey: d.apiKey, apiVersion: a.apiVersion});
       if (d.stripeAccount) req.options.stripeAccount = d.stripeAccount;

@@ -1,5 +1,5 @@
 'use strict';
-const {resolveSecretRef} = require('./secrets');
+const {resolveSecretRef, assertRefAcceptable} = require('./secrets');
 
 function sourceSecret(value, env, opts) {
   const o = opts || {};
@@ -22,10 +22,18 @@ function resolveAccount(reg, name, opts) {
     throw new Error('Unknown account "' + accountName + '". Available: ' + Object.keys(reg.accounts).join(', '));
   }
   const mode = opts.live ? 'live' : 'test';
+  const field = opts.live ? 'live_secret_key' : 'test_secret_key';
   if (acct.type === 'standalone') {
+    const key = pickKey(acct, opts.live);
+    // Defence in depth: loadRegistry already validated this reference shape,
+    // but a caller that built or edited a registry object without going
+    // through loadRegistry (or a future entry point that skips it) must not
+    // silently reopen the env:-live-key hole. Re-check here, right before
+    // the value would be resolved.
+    assertRefAcceptable(key, {field, account: accountName, live: !!opts.live});
     return {
       name: accountName, mode,
-      apiKey: sourceSecret(pickKey(acct, opts.live), opts.env,
+      apiKey: sourceSecret(key, opts.env,
         {opAccount: acct.op_account, opRunner: opts.opRunner}),
       stripeAccount: undefined
     };
@@ -38,11 +46,16 @@ function resolveAccount(reg, name, opts) {
     if (!acct.connected_account) {
       throw new Error('Connect account "' + accountName + '" is missing connected_account.');
     }
+    const key = pickKey(platform, opts.live);
+    // The key belongs to the platform, so it is validated (and, on refusal,
+    // named) against the platform's own account name, not the connect
+    // account's - the platform record is where the offending field lives.
+    assertRefAcceptable(key, {field, account: acct.platform, live: !!opts.live});
     return {
       name: accountName, mode,
       // The key belongs to the platform, so the 1Password account selector
       // must come from the platform record, not the connect record.
-      apiKey: sourceSecret(pickKey(platform, opts.live), opts.env,
+      apiKey: sourceSecret(key, opts.env,
         {opAccount: platform.op_account, opRunner: opts.opRunner}),
       stripeAccount: acct.connected_account
     };

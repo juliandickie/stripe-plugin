@@ -96,8 +96,19 @@ function normalize(cmd) {
 // mention gate (the first real test _decide runs once it has a command
 // string) can never disagree. decide() uses this to gate vetting-token
 // issuance, which must happen outside _decide - see decide() below.
+//
+// Requires the same hook_event_name === 'PreToolUse' and tool_name === 'Bash'
+// conditions _decide checks first. hooks.json only ever invokes this hook
+// for that combination, so in production _decide already returns defer()
+// before reaching anything event/tool-specific - but decide()'s issuance
+// check runs on ANY non-deny result, including that early defer(), so
+// without this gate a non-PreToolUse or non-Bash input whose command text
+// happens to mention the engine would still mint a token. Requiring the
+// same conditions here closes that gap rather than relying on hooks.json
+// alone to keep it unreachable.
 function mentionsEngine(input) {
-  const cmd = input && input.tool_input && input.tool_input.command;
+  if (!input || input.hook_event_name !== 'PreToolUse' || input.tool_name !== 'Bash') return false;
+  const cmd = input.tool_input && input.tool_input.command;
   if (typeof cmd !== 'string' || cmd.length === 0) return false;
   return normalize(cmd).indexOf(ENGINE) !== -1;
 }

@@ -174,6 +174,29 @@ test('arm and vet then execute across calls does execute', async () => {
   assert.equal(rec[0].apiKey, 'sk_live_idd');
 });
 
+test('a live preview (no --confirm) returns exit 10 and never touches 1Password, even when armed and vetted', async () => {
+  const s = setup(ACCOUNTS);
+  const opCalls = [];
+  const spyOp = (argv) => { opCalls.push(argv); return OP(); };
+  const ctx = {env: {CLAUDE_PLUGIN_DATA: s.dir, CLAUDE_SESSION_ID: 'sess-preview', IDD_TEST: 'sk_test_idd'},
+    stripeFactory: fakeFactory([]), opRunner: spyOp};
+  const armed = await run(['customers', 'create', '--account', 'idd',
+    '--live', '--arm-live', '--accounts-file', s.regPath], ctx);
+  assert.equal(armed.exitCode, 14);
+  const vetted = await run(['vet'], Object.assign({}, ctx, {isTTY: true}));
+  assert.equal(vetted.exitCode, 0);
+  // Armed and vetted, so neither the ARM nor the UNVETTED refusal can be
+  // what stops secret resolution below - only the deferred-resolveAccount
+  // fix under test can.
+  const r = await run(['customers', 'create', '--account', 'idd', '--data', 'email=a@b.co',
+    '--live', '--accounts-file', s.regPath], ctx);
+  assert.equal(r.exitCode, 10);
+  assert.match(r.stdout, /CONFIRMATION REQUIRED/);
+  assert.match(r.stdout, /account: idd/);
+  assert.match(r.stdout, /mode: LIVE/);
+  assert.equal(opCalls.length, 0, 'a live preview must never invoke the opRunner stub');
+});
+
 test('--arm-live without --live is a usage error', async () => {
   const s = setup(ACCOUNTS);
   const r = await run(['customers', 'create', '--account', 'idd', '--arm-live',

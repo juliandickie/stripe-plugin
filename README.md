@@ -27,6 +27,8 @@ Three classes enforced inside the engine binary: reads run immediately; mutating
 
 The engine enforces all of the above, but it cannot defend against a caller that writes its own flags. A `PreToolUse` hook is a required second layer that reads the harness permission mode and denies or escalates stripe-x calls Claude Code would otherwise run unattended (see Security below).
 
+Live mutating and destructive operations also require a vetting token, proof that some permission gate saw the call, on top of arming. Inside Claude Code the `PreToolUse` guard issues one automatically for any stripe-x invocation it recognises and does not deny, so this needs no separate step. Working directly in a terminal, run `stripe-x vet` first; it requires a real terminal (a TTY) and refuses otherwise, so an unattended agent cannot mint one for itself. A live call carrying no token is refused, exit code 15.
+
 ## What you get
 
 Skills: stripe-setup (user-only), stripe-api, stripe-accounts, stripe-multi-account, stripe-webhooks, stripe-reports, stripe-money-ops (user-only). Agent: stripe-bulk-runner. Optional MCP shim (off by default; set enable_mcp_shim).

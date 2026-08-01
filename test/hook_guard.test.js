@@ -333,6 +333,18 @@ test('mentionsEngine agrees with the mention gate it mirrors inside decide()', (
   assert.equal(mentionsEngine(ev(123, 'auto')), false);
 });
 
+test('mentionsEngine requires the same event and tool _decide requires, even though hooks.json makes this unreachable in production', () => {
+  assert.equal(mentionsEngine(ev('stripe-x customers list', 'auto', {tool_name: 'Read'})), false);
+  assert.equal(mentionsEngine(ev('stripe-x customers list', 'auto', {hook_event_name: 'PostToolUse'})), false);
+});
+
+test('a non-Bash event mentioning the engine issues no token', () => {
+  const env = {CLAUDE_PLUGIN_DATA: dataDir(), CLAUDE_SESSION_ID: 's'};
+  const d = decide(ev('stripe-x customers list --account idd', 'auto', {tool_name: 'Read'}), env);
+  assert.equal(d.permissionDecision, 'defer');
+  assert.equal(isVetted(env), false);
+});
+
 test('a deny decision issues no token', () => {
   const env = {CLAUDE_PLUGIN_DATA: dataDir(), CLAUDE_SESSION_ID: 's'};
   const d = decide(ev('stripe-x refunds create --live --confirm', 'auto'), env);

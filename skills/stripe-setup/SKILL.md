@@ -102,3 +102,5 @@ Any `op://` reference, for a test key or a live key, resolves through the 1Passw
 ## Safety
 
 Never write a key the user has not explicitly provided. Never echo full secret values back to the conversation.
+
+Live operations also require a vetting token, on top of arming. Inside Claude Code the PreToolUse guard hook (step 7 above) issues one automatically for any stripe-x call it recognises and does not deny. A human working directly in a terminal, outside Claude Code, must run `stripe-x vet` first; it requires a real terminal (a TTY) and refuses otherwise, which is what stops an unattended agent from minting one for itself.

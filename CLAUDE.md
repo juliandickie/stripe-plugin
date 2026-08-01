@@ -2,7 +2,7 @@
 
 ## What this plugin does
 
-Full programmatic access to every Stripe API endpoint the pinned stripe-node SDK exposes, across many accounts (standalone keys and Connect), replacing the single-account MCP connector. The engine binary owns operation-level enforcement (classification, confirmation, arming, fan-out refusal, bulk scope review). It cannot defend against a caller that writes its own flags, so a PreToolUse hook in `hooks/` owns the permission-mode boundary. Both share `src/classify.js`, so a new money-mover added to the frozen DESTRUCTIVE list teaches both gates at once.
+Full programmatic access to every Stripe API endpoint the pinned stripe-node SDK exposes, across many accounts (standalone keys and Connect), replacing the single-account MCP connector. The engine binary owns operation-level enforcement (classification, confirmation, arming, fan-out refusal, bulk scope review). It cannot defend against a caller that writes its own flags, so a PreToolUse hook in `hooks/` owns the permission-mode boundary; the engine additionally requires a live operation to carry a vetting token (`src/vetting.js`, exit code 15) that only that hook (or a human running `stripe-x vet` from a real terminal) can issue, so an invocation the guard never recognised is refused rather than executed. Both share `src/classify.js`, so a new money-mover added to the frozen DESTRUCTIVE list teaches both gates at once.
 
 ## Layout rules
 
