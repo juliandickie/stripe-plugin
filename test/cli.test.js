@@ -154,7 +154,7 @@ test('REGRESSION: --live --arm-live --confirm must NOT execute in one call', asy
   assert.equal(rec.length, 0, 'the one-shot live path must be closed');
 });
 
-test('arm then execute across two calls does execute', async () => {
+test('arm and vet then execute across calls does execute', async () => {
   const s = setup(ACCOUNTS);
   const rec = [];
   const ctx = {env: {CLAUDE_PLUGIN_DATA: s.dir, CLAUDE_SESSION_ID: 'sess-two', IDD_TEST: 'sk_test_idd'},
@@ -163,6 +163,10 @@ test('arm then execute across two calls does execute', async () => {
     '--live', '--arm-live', '--accounts-file', s.regPath], ctx);
   assert.equal(armed.exitCode, 14);
   assert.equal(rec.length, 0);
+  // Arming alone is no longer sufficient for live execution (Task 7): a
+  // vetting token is also required, as issued by `stripe-x vet` here.
+  const vetted = await run(['vet'], Object.assign({}, ctx, {isTTY: true}));
+  assert.equal(vetted.exitCode, 0);
   const r = await run(['customers', 'create', '--account', 'idd', '--data', 'email=a@b.co',
     '--live', '--confirm', '--accounts-file', s.regPath], ctx);
   assert.equal(r.exitCode, 0);
@@ -197,6 +201,98 @@ test('--arm-live on a read arms and exits uniformly (no read/write distinction)'
      stripeFactory: fakeFactory(rec), opRunner: OP});
   assert.equal(r.exitCode, 14);
   assert.match(r.stdout, /ARMED/);
+  assert.equal(rec.length, 0);
+});
+
+// ---- vetting (exit 15): live mutating/destructive ops require a token that
+// proves a permission gate saw the call, on top of (not instead of) arming ----
+
+test('stripe-x vet with no TTY is refused (exit 2) and issues no token', async () => {
+  const s = setup(ACCOUNTS);
+  const env = {CLAUDE_PLUGIN_DATA: s.dir, CLAUDE_SESSION_ID: 'sess-vet-notty', IDD_TEST: 'sk_test_idd'};
+  const r = await run(['vet'], {env: env, isTTY: false});
+  assert.equal(r.exitCode, 2);
+  assert.match(r.stdout, /must be run interactively/i);
+
+  // Prove no token was issued: arm, then a live destructive call must still
+  // be refused as unvetted rather than executed.
+  await run(['customers', 'del', '--id', 'cus_1', '--account', 'idd',
+    '--live', '--arm-live', '--accounts-file', s.regPath], {env: env, opRunner: OP});
+  const rec = [];
+  const r2 = await run(['customers', 'del', '--id', 'cus_1', '--account', 'idd',
+    '--live', '--confirm', '--accounts-file', s.regPath],
+    {env: env, stripeFactory: fakeFactory(rec), opRunner: OP});
+  assert.equal(r2.exitCode, 15);
+  assert.equal(rec.length, 0);
+});
+
+test('stripe-x vet with a TTY exits 0 and issues a token', async () => {
+  const s = setup(ACCOUNTS);
+  const env = {CLAUDE_PLUGIN_DATA: s.dir, CLAUDE_SESSION_ID: 'sess-vet-tty', IDD_TEST: 'sk_test_idd'};
+  const r = await run(['vet'], {env: env, isTTY: true});
+  assert.equal(r.exitCode, 0);
+  assert.match(r.stdout, /VETTED/);
+
+  // Prove a token was issued: arm, then the same live destructive call executes.
+  await run(['customers', 'del', '--id', 'cus_1', '--account', 'idd',
+    '--live', '--arm-live', '--accounts-file', s.regPath], {env: env, opRunner: OP});
+  const rec = [];
+  const r2 = await run(['customers', 'del', '--id', 'cus_1', '--account', 'idd',
+    '--live', '--confirm', '--accounts-file', s.regPath],
+    {env: env, stripeFactory: fakeFactory(rec), opRunner: OP});
+  assert.equal(r2.exitCode, 0);
+  assert.equal(rec.length, 1);
+});
+
+test('live destructive call: armed but NOT vetted -> exit 15, zero Stripe calls', async () => {
+  const s = setup(ACCOUNTS);
+  const env = {CLAUDE_PLUGIN_DATA: s.dir, CLAUDE_SESSION_ID: 'sess-armed-unvetted', IDD_TEST: 'sk_test_idd'};
+  await run(['customers', 'del', '--id', 'cus_1', '--account', 'idd',
+    '--live', '--arm-live', '--accounts-file', s.regPath], {env: env, opRunner: OP});
+  const rec = [];
+  const r = await run(['customers', 'del', '--id', 'cus_1', '--account', 'idd',
+    '--live', '--confirm', '--accounts-file', s.regPath],
+    {env: env, stripeFactory: fakeFactory(rec), opRunner: OP});
+  assert.equal(r.exitCode, 15);
+  assert.match(r.stdout, /no vetting token/i);
+  assert.equal(rec.length, 0);
+});
+
+test('live destructive call: armed AND vetted -> exit 0, exactly one Stripe call', async () => {
+  const s = setup(ACCOUNTS);
+  const env = {CLAUDE_PLUGIN_DATA: s.dir, CLAUDE_SESSION_ID: 'sess-armed-vetted', IDD_TEST: 'sk_test_idd'};
+  await run(['customers', 'del', '--id', 'cus_1', '--account', 'idd',
+    '--live', '--arm-live', '--accounts-file', s.regPath], {env: env, opRunner: OP});
+  await run(['vet'], {env: env, isTTY: true});
+  const rec = [];
+  const r = await run(['customers', 'del', '--id', 'cus_1', '--account', 'idd',
+    '--live', '--confirm', '--accounts-file', s.regPath],
+    {env: env, stripeFactory: fakeFactory(rec), opRunner: OP});
+  assert.equal(r.exitCode, 0);
+  assert.equal(rec.length, 1);
+});
+
+test('TEST-mode destructive call needs no vetting at all and still works as before', async () => {
+  const s = setup(ACCOUNTS);
+  const rec = [];
+  const r = await run(['customers', 'del', '--id', 'cus_1', '--account', 'idd',
+    '--confirm', '--accounts-file', s.regPath],
+    {env: {CLAUDE_PLUGIN_DATA: s.dir, CLAUDE_SESSION_ID: 'sess-testmode', IDD_TEST: 'sk_test_idd'},
+     stripeFactory: fakeFactory(rec)});
+  assert.equal(r.exitCode, 0);
+  assert.equal(rec.length, 1);
+  assert.equal(rec[0].id, 'cus_1');
+});
+
+test('neither armed nor vetted: the arming refusal (exit 12) comes back first', async () => {
+  const s = setup(ACCOUNTS);
+  const rec = [];
+  const r = await run(['customers', 'del', '--id', 'cus_1', '--account', 'idd',
+    '--live', '--confirm', '--accounts-file', s.regPath],
+    {env: {CLAUDE_PLUGIN_DATA: s.dir, CLAUDE_SESSION_ID: 'sess-neither', IDD_TEST: 'sk_test_idd'},
+     stripeFactory: fakeFactory(rec), opRunner: OP});
+  assert.equal(r.exitCode, 12);
+  assert.match(r.stdout, /live mode not armed/i);
   assert.equal(rec.length, 0);
 });
 

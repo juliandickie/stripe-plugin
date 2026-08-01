@@ -4,11 +4,12 @@ const {resolveRegistryPath, loadRegistry} = require('./registry');
 const {resolveAccount, expandAccounts, isFanOut} = require('./resolver');
 const {classify} = require('./classify');
 const {isArmed, arm} = require('./arming');
+const {issue: issueVet, isVetted} = require('./vetting');
 const {needsScopeReview, scopeReview} = require('./bulk');
 const {camelizePath, resolveMethod, callStripe} = require('./dispatch');
 const {mapStripeError, aggregate} = require('./errors');
 
-const EXIT = {OK: 0, ERROR: 1, USAGE: 2, CONFIRM: 10, BULK: 11, ARM: 12, FANOUT: 13, ARMED: 14};
+const EXIT = {OK: 0, ERROR: 1, USAGE: 2, CONFIRM: 10, BULK: 11, ARM: 12, FANOUT: 13, ARMED: 14, UNVETTED: 15};
 
 function parseArgs(argv) {
   const a = {data: {}, expand: [], _: []};
@@ -96,6 +97,22 @@ async function run(argv, ctx) {
   if (a.resource === 'cli') {
     return await runCliBridge(a, env, ctx);
   }
+  if (a.resource === 'vet') {
+    // Requires a controlling terminal. Claude Code's Bash tool has no TTY,
+    // so an agent cannot mint a token this way; a human at a terminal can.
+    // That distinction is what stops this escape hatch being available to
+    // the very caller the vetting token exists to constrain.
+    const tty = (ctx && ctx.isTTY !== undefined) ? ctx.isTTY : !!process.stdin.isTTY;
+    if (!tty) {
+      return {exitCode: EXIT.USAGE,
+        stdout: 'REFUSED: `stripe-x vet` must be run interactively from a terminal. '
+          + 'Inside Claude Code, the permission guard issues vetting automatically.'};
+    }
+    issueVet(env);
+    return {exitCode: EXIT.OK,
+      stdout: 'VETTED: live operations are permitted for this session for the next '
+        + '5 minutes. Re-run `stripe-x vet` to extend.'};
+  }
   if (!a.resource || !a.action) {
     return {exitCode: EXIT.USAGE, stdout: 'Usage: stripe-x <resource.path> <action> [flags]'};
   }
@@ -151,6 +168,12 @@ async function run(argv, ctx) {
     if (a.live && (cls === 'mutating' || cls === 'destructive')) {
       if (!isArmed(d.name, env)) {
         return {exitCode: EXIT.ARM, stdout: 'REFUSED: live mode not armed for "' + d.name + '". Re-run with --arm-live to arm this session.'};
+      }
+      if (!isVetted(env)) {
+        return {exitCode: EXIT.UNVETTED,
+          stdout: 'REFUSED: this live operation carries no vetting token, so no permission '
+            + 'gate saw it. Inside Claude Code the guard issues vetting automatically; from '
+            + 'a terminal run `stripe-x vet` first.'};
       }
     }
     if (a.bulkIds && a.bulkIds.length) {
