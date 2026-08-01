@@ -69,6 +69,10 @@ test('listAccounts returns no secret values', () => {
   fs.writeFileSync(rp, JSON.stringify({default_account: 'x', accounts: {x: {type: 'standalone', label: 'X', test_secret_key: 'env:T', live_secret_key: 'op://V/I/live'}}}));
   const res = listAccounts({CLAUDE_PLUGIN_DATA: d});
   const json = JSON.stringify(res);
-  assert.ok(!json.includes('sk_test_SECRETVAL') && !json.includes('sk_live_SECRETVAL'));
+  // Anchored to the current fixture AND to the field names, so this stays a
+  // real guard if the fixture changes again.
+  assert.ok(!json.includes('env:T'), 'must not echo the test key reference');
+  assert.ok(!json.includes('op://V/I/live'), 'must not echo the live key reference');
+  assert.ok(!/_secret_key/.test(json), 'must not expose any *_secret_key field');
   assert.equal(res.accounts.x.has_test_key, true);
 });
