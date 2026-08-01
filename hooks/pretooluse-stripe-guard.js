@@ -37,7 +37,8 @@
 // currently correct and one that is structurally correct.
 const {classify} = require('../src/classify');
 const {camelizePath} = require('../src/dispatch');
-const {issue: issueVet} = require('../src/vetting');
+const {issue: issueVet, canonicalKey} = require('../src/vetting');
+const {classifyCliSub} = require('../src/cli_bridge');
 
 const ENGINE = 'stripe-x';
 
@@ -201,6 +202,95 @@ function _decide(input) {
     + 'permission mode. Confirm before running.');
 }
 
+// A STRICT, SEPARATE parse whose only job is to name the operation for
+// src/vetting.js. It is deliberately NOT wired into _decide.
+//
+// _decide's fallbacks are not interchangeable - "more than one invocation"
+// asks, an unproven-simple command denies, an unlocatable engine token asks -
+// and those distinctions are what nine bypasses were spent establishing.
+// Folding this parse into it would collapse them into one null result and put
+// a proven classifier at risk for a cosmetic gain.
+//
+// The duplication is bounded in the safe direction. If this parse and _decide
+// ever disagree, the effect is that no token is issued and the engine refuses
+// a legitimate live call. It can never authorise one _decide would have
+// stopped, because a token is only ever issued when _decide has already
+// declined to deny.
+//
+// Returns null whenever the operation cannot be named with certainty.
+function parseEngineCommand(cmd) {
+  if (typeof cmd !== 'string' || cmd.length === 0) return null;
+  // Only a command drawn entirely from the safe character set can be
+  // tokenized by splitting on whitespace. Anything else may be rewritten by
+  // the shell before the engine sees it, so it cannot be named.
+  if (!SIMPLE_CHARS.test(cmd)) return null;
+  const normalized = normalize(cmd);
+  if (countEngineMentions(normalized) !== 1) return null;
+
+  const tokens = cmd.trim().split(/\s+/);
+  const i = tokens.findIndex(isEngineToken);
+  if (i === -1) return null;
+
+  const out = {account: '', accountsFile: '', id: '', bulkIds: '', live: false, arm: false};
+  const positional = [];
+  const rest = tokens.slice(i + 1);
+  for (let j = 0; j < rest.length; j++) {
+    const t = rest[j];
+    if (t.charAt(0) === '-') {
+      if (VALUE_FLAGS.has(t)) {
+        const v = rest[++j];
+        if (v === undefined) return null;
+        if (t === '--account') out.account = v;
+        else if (t === '--accounts-file') out.accountsFile = v;
+        else if (t === '--id') out.id = v;
+        else if (t === '--bulk-ids') out.bulkIds = v;
+        continue;
+      }
+      // An unrecognised flag means this parse and src/cli.js's parseArgs
+      // would disagree about which tokens are positional. Refuse to guess.
+      if (!BOOLEAN_FLAGS.has(t)) return null;
+      if (t === '--live') out.live = true;
+      else if (t === '--arm-live') out.arm = true;
+      continue;
+    }
+    positional.push(t);
+  }
+
+  const resource = positional[0];
+  const action = positional[1];
+  if (!resource || !IDENTIFIER.test(resource)) return null;
+  if (!action || !IDENTIFIER.test(action)) return null;
+  out.resource = resource;
+  out.action = action;
+  return out;
+}
+
+// The key for an invocation, or null when the engine will not demand one.
+//
+// Issuing only for operations the engine actually gates keeps the token
+// directory small and, more importantly, keeps the number of live tokens in
+// existence at any moment as close to zero as the work allows. A read never
+// mints anything that a later write could ride.
+function vettingKeyFor(input) {
+  if (!mentionsEngine(input)) return null;
+  const op = parseEngineCommand(input.tool_input.command);
+  if (!op) return null;
+  // Vetting is a live-money control; the engine consults it nowhere else.
+  if (!op.live) return null;
+  // Neither reaches a gated operation, and both are checked BEFORE the arm
+  // branch below: `stripe-x vet ... --arm-live` would otherwise mint a token
+  // keyed on the literal resource "vet", which names no real operation.
+  if (op.resource === 'help' || op.resource === 'vet') return null;
+  // Arming is gated in its own right, and its key is distinct from the
+  // execution key, so approving an arm never approves the execution.
+  if (op.arm) return canonicalKey(op);
+  const cls = op.resource === 'cli'
+    ? classifyCliSub(op.action)
+    : classify(camelizePath(op.resource).split('.').pop(), op.action);
+  if (cls === 'read') return null;
+  return canonicalKey(op);
+}
+
 function decide(input, env) {
   const environment = env || process.env;
   // A throwing guard must never fail open.
@@ -212,14 +302,18 @@ function decide(input, env) {
   }
 
   // A recognised stripe-x invocation that is not denied - `defer` (prompting
-  // modes, simple reads) or an `ask` the user goes on to approve - must
-  // still be able to run a live operation, and src/vetting.js refuses a
-  // live call with no token. Only `deny` withholds one. This happens here,
-  // after the decision is computed, never inside _decide, so _decide stays
-  // a pure classifier and every side effect of this module lives in one
-  // place.
-  if (result.permissionDecision !== 'deny' && environment.CLAUDE_PLUGIN_DATA
-      && mentionsEngine(input)) {
+  // modes) or an `ask` the user goes on to approve - must still be able to
+  // run its live operation, and src/vetting.js refuses a live call carrying
+  // no token for that operation. Only `deny` withholds one. This happens
+  // here, after the decision is computed, never inside _decide, so _decide
+  // stays a pure classifier and every side effect of this module lives in
+  // one place.
+  //
+  // The token names one operation. vettingKeyFor returns null for anything
+  // the engine will not gate, and for anything this module cannot parse with
+  // certainty, so an invocation assembled at runtime mints nothing and a
+  // routine read mints nothing a later write could ride.
+  if (result.permissionDecision !== 'deny' && environment.CLAUDE_PLUGIN_DATA) {
     // Require CLAUDE_PLUGIN_DATA before writing: with it unset there is no
     // coordinated location for the token, and writing to a relative path
     // would litter the repository instead. The decision computed above is
@@ -228,7 +322,8 @@ function decide(input, env) {
     // that decision, so a write failure here is scoped to its own
     // try/catch and is not allowed to alter or throw past the decision.
     try {
-      issueVet(environment);
+      const key = vettingKeyFor(input);
+      if (key) issueVet(environment, key);
     } catch (e) {
       // Deliberately empty: see comment above.
     }
@@ -255,4 +350,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = {decide, mentionsEngine, VALUE_FLAGS, BOOLEAN_FLAGS};
+module.exports = {decide, mentionsEngine, parseEngineCommand, vettingKeyFor, VALUE_FLAGS, BOOLEAN_FLAGS};

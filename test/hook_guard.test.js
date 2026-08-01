@@ -3,8 +3,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const {decide, mentionsEngine, VALUE_FLAGS, BOOLEAN_FLAGS} = require('../hooks/pretooluse-stripe-guard');
-const {isVetted} = require('../src/vetting');
+const {decide, mentionsEngine, parseEngineCommand, vettingKeyFor, VALUE_FLAGS, BOOLEAN_FLAGS} = require('../hooks/pretooluse-stripe-guard');
+const {isVetted, canonicalKey} = require('../src/vetting');
 
 function ev(command, permission_mode, overrides) {
   return Object.assign({
@@ -309,16 +309,28 @@ test('the hook process entry point defers on malformed stdin', () => {
   assert.equal(JSON.parse(out).hookSpecificOutput.permissionDecision, 'defer');
 });
 
-// --- Vetting token issuance (Changes 1 and 5) ---
+// --- Vetting token issuance ---
 //
-// The guard now issues a vetting token (src/vetting.js's issue()) whenever
-// it recognises a stripe-x invocation and does not deny it, so a `defer`
-// or an approved `ask` can still run a live operation, which the engine
-// refuses without a token (src/vetting.js, exit 15). These tests exercise
-// decide()'s optional second `env` parameter directly, pointing
-// CLAUDE_PLUGIN_DATA at a scratch temp directory rather than the real
-// plugin data directory, and use isVetted() from src/vetting.js to assert
-// on the result. Mirrors the dataDir() helper in test/vetting.test.js.
+// The guard issues a vetting token (src/vetting.js's issue()) when it parses
+// a stripe-x invocation that the engine will gate and does not deny it, so a
+// `defer` or an approved `ask` can still run its live operation, which the
+// engine refuses without a matching token (src/vetting.js, exit 15).
+//
+// TWO PROPERTIES CHANGED HERE WHEN THE TOKEN WAS BOUND TO THE CALL, and they
+// are the whole point of the change rather than incidental:
+//
+//   1. A token names ONE operation. It is filed under canonicalKey() and
+//      vets nothing else.
+//   2. Only operations the engine actually gates mint anything at all. Reads
+//      and test-mode calls now issue NOTHING. Under the unbound scheme every
+//      recognised call minted a session-wide token, so routine read traffic
+//      kept one warm almost continuously and an obfuscated live call could
+//      ride it. That was the Critical this replaced.
+//
+// These tests exercise decide()'s optional second `env` parameter directly,
+// pointing CLAUDE_PLUGIN_DATA at a scratch temp directory rather than the
+// real plugin data directory, and use isVetted() from src/vetting.js to
+// assert on the result. Mirrors the dataDir() helper in test/vetting.test.js.
 
 function dataDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'hook-guard-vet-'));
@@ -338,62 +350,185 @@ test('mentionsEngine requires the same event and tool _decide requires, even tho
   assert.equal(mentionsEngine(ev('stripe-x customers list', 'auto', {hook_event_name: 'PostToolUse'})), false);
 });
 
+const LIVE_REFUND = canonicalKey({account: 'idd', resource: 'refunds', action: 'create', live: true});
+const LIVE_REFUND_CMD = 'stripe-x refunds create --live --confirm --account idd';
+
 test('a non-Bash event mentioning the engine issues no token', () => {
   const env = {CLAUDE_PLUGIN_DATA: dataDir(), CLAUDE_SESSION_ID: 's'};
-  const d = decide(ev('stripe-x customers list --account idd', 'auto', {tool_name: 'Read'}), env);
+  const d = decide(ev(LIVE_REFUND_CMD, 'auto', {tool_name: 'Read'}), env);
   assert.equal(d.permissionDecision, 'defer');
-  assert.equal(isVetted(env), false);
+  assert.equal(isVetted(env, LIVE_REFUND), false);
 });
 
 test('a deny decision issues no token', () => {
   const env = {CLAUDE_PLUGIN_DATA: dataDir(), CLAUDE_SESSION_ID: 's'};
-  const d = decide(ev('stripe-x refunds create --live --confirm', 'auto'), env);
+  const d = decide(ev(LIVE_REFUND_CMD, 'auto'), env);
   assert.equal(d.permissionDecision, 'deny');
-  assert.equal(isVetted(env), false);
+  assert.equal(isVetted(env, LIVE_REFUND), false);
 });
 
-test('a defer decision on a simple read issues a token', () => {
+test('a read issues NO token, so routine traffic cannot keep one warm', () => {
+  // The Critical this replaced: under the unbound scheme this call minted a
+  // session-wide token, and an obfuscated live call could then ride it.
   const env = {CLAUDE_PLUGIN_DATA: dataDir(), CLAUDE_SESSION_ID: 's'};
   const d = decide(ev('stripe-x customers list --account idd', 'auto'), env);
   assert.equal(d.permissionDecision, 'defer');
-  assert.equal(isVetted(env), true);
+  assert.equal(isVetted(env, canonicalKey({account: 'idd', resource: 'customers', action: 'list', live: true})), false);
+  assert.equal(isVetted(env, LIVE_REFUND), false);
+  assert.equal(fs.readdirSync(env.CLAUDE_PLUGIN_DATA).length, 0, 'nothing written at all');
 });
 
-test('an ask decision issues a token', () => {
+test('a test-mode write issues no token, because the engine never gates one', () => {
   const env = {CLAUDE_PLUGIN_DATA: dataDir(), CLAUDE_SESSION_ID: 's'};
   const d = decide(ev('stripe-x customers create --account idd --confirm', 'auto'), env);
   assert.equal(d.permissionDecision, 'ask');
-  assert.equal(isVetted(env), true);
+  assert.equal(isVetted(env, canonicalKey({account: 'idd', resource: 'customers', action: 'create', live: false})), false);
+  assert.equal(fs.readdirSync(env.CLAUDE_PLUGIN_DATA).length, 0, 'nothing written at all');
 });
 
-test('a prompting-mode defer issues a token', () => {
+test('a prompting-mode defer on a live op issues a token bound to that op', () => {
   const env = {CLAUDE_PLUGIN_DATA: dataDir(), CLAUDE_SESSION_ID: 's'};
-  const d = decide(ev('stripe-x refunds create --live --confirm', 'default'), env);
+  const d = decide(ev(LIVE_REFUND_CMD, 'default'), env);
   assert.equal(d.permissionDecision, 'defer');
-  assert.equal(isVetted(env), true);
+  assert.equal(isVetted(env, LIVE_REFUND), true);
+  // The binding, asserted from the guard's own side: this token authorises
+  // that refund and nothing else.
+  assert.equal(isVetted(env, canonicalKey({account: 'idd', resource: 'payouts', action: 'create', live: true})), false);
+  assert.equal(isVetted(env, canonicalKey({account: 'promktg', resource: 'refunds', action: 'create', live: true})), false);
+  assert.equal(isVetted(env, canonicalKey({account: 'idd', resource: 'refunds', action: 'create', live: true, arm: true})), false);
+});
+
+test('a prompting-mode defer on a live arm issues an arm token only', () => {
+  const env = {CLAUDE_PLUGIN_DATA: dataDir(), CLAUDE_SESSION_ID: 's'};
+  const d = decide(ev('stripe-x refunds create --live --arm-live --account idd', 'default'), env);
+  assert.equal(d.permissionDecision, 'defer');
+  assert.equal(isVetted(env, canonicalKey({account: 'idd', resource: 'refunds', action: 'create', live: true, arm: true})), true);
+  assert.equal(isVetted(env, LIVE_REFUND), false, 'arming a live op must not authorise executing it');
+});
+
+test('a runtime-assembled invocation mints nothing, so the engine has nothing to find', () => {
+  // The guard cannot recognise this and never could; no text classifier can.
+  // The defence is that it therefore issues no token, not that it spots it.
+  const env = {CLAUDE_PLUGIN_DATA: dataDir(), CLAUDE_SESSION_ID: 's'};
+  decide(ev('A=stri; B=pe-x; $A$B refunds create --live --confirm --account idd', 'default'), env);
+  assert.equal(isVetted(env, LIVE_REFUND), false);
+  assert.equal(fs.readdirSync(env.CLAUDE_PLUGIN_DATA).length, 0);
+});
+
+test('a live op the guard cannot prove simple mints nothing', () => {
+  const env = {CLAUDE_PLUGIN_DATA: dataDir(), CLAUDE_SESSION_ID: 's'};
+  decide(ev('stripe-x refunds create --li"ve" --confirm --account idd', 'default'), env);
+  assert.equal(isVetted(env, LIVE_REFUND), false);
 });
 
 test('a command that never mentions the engine issues no token', () => {
   const env = {CLAUDE_PLUGIN_DATA: dataDir(), CLAUDE_SESSION_ID: 's'};
   const d = decide(ev('ls -la', 'auto'), env);
   assert.equal(d.permissionDecision, 'defer');
-  assert.equal(isVetted(env), false);
+  assert.equal(isVetted(env, LIVE_REFUND), false);
 });
 
 test('issuance is skipped when CLAUDE_PLUGIN_DATA is absent', () => {
   const env = {CLAUDE_SESSION_ID: 's'};
-  const d = decide(ev('stripe-x customers list --account idd', 'auto'), env);
+  const d = decide(ev(LIVE_REFUND_CMD, 'default'), env);
   assert.equal(d.permissionDecision, 'defer');
-  assert.equal(isVetted(env), false);
+  assert.equal(isVetted(env, LIVE_REFUND), false);
 });
 
 test('a failure to write a token does not change or throw past the decision', () => {
   const dir = dataDir();
   // Block issue()'s mkdirSync: a regular file sitting where it needs to
-  // create a directory makes the write throw ENOTDIR.
+  // create a directory makes the write throw ENOTDIR. Uses a live op so the
+  // write is genuinely attempted.
   fs.writeFileSync(path.join(dir, 'stripe-x'), 'not a directory');
   const env = {CLAUDE_PLUGIN_DATA: dir, CLAUDE_SESSION_ID: 's'};
-  const d = decide(ev('stripe-x customers list --account idd', 'auto'), env);
+  const d = decide(ev(LIVE_REFUND_CMD, 'default'), env);
   assert.equal(d.permissionDecision, 'defer');
-  assert.equal(isVetted(env), false);
+  assert.equal(isVetted(env, LIVE_REFUND), false);
+});
+
+// --- The key parse itself ---
+
+test('vettingKeyFor names exactly the operation the engine will compute', () => {
+  assert.equal(vettingKeyFor(ev(LIVE_REFUND_CMD, 'default')), LIVE_REFUND);
+  assert.equal(
+    vettingKeyFor(ev('stripe-x cli post /v1/refunds --live --account idd', 'default')),
+    canonicalKey({account: 'idd', resource: 'cli', action: 'post', live: true}));
+});
+
+test('vettingKeyFor returns null for anything the engine will not gate', () => {
+  assert.equal(vettingKeyFor(ev('stripe-x customers list --account idd --live', 'default')), null, 'live read');
+  assert.equal(vettingKeyFor(ev('stripe-x customers create --account idd', 'default')), null, 'test-mode write');
+  assert.equal(vettingKeyFor(ev('stripe-x cli logs --live --account idd', 'default')), null, 'live CLI read');
+  assert.equal(vettingKeyFor(ev('stripe-x help refunds', 'default')), null, 'help');
+  assert.equal(vettingKeyFor(ev('ls -la', 'default')), null, 'unrelated command');
+});
+
+test('parseEngineCommand refuses to name anything it cannot read with certainty', () => {
+  assert.equal(parseEngineCommand('stripe-x refunds create --li"ve" --account idd'), null, 'quoting');
+  assert.equal(parseEngineCommand('A=stri; B=pe-x; $A$B refunds create --live'), null, 'runtime assembly');
+  assert.equal(parseEngineCommand('stripe-x refunds list | stripe-x refunds create --live'), null, 'two invocations');
+  assert.equal(parseEngineCommand('stripe-x refunds create --live --unknown-flag'), null, 'unrecognised flag');
+  assert.equal(parseEngineCommand('stripe-x refunds --account'), null, 'value flag with no value');
+  assert.equal(parseEngineCommand('stripe-x refunds'), null, 'no action');
+});
+
+test('vet and help never mint a key, even carrying --arm-live', () => {
+  // `stripe-x vet ... --arm-live` must not mint a token keyed on the literal
+  // resource "vet", which names no real operation.
+  assert.equal(vettingKeyFor(ev('stripe-x vet refunds create --live --arm-live --account idd', 'default')), null);
+  assert.equal(vettingKeyFor(ev('stripe-x vet refunds create --live --account idd', 'default')), null);
+  assert.equal(vettingKeyFor(ev('stripe-x help refunds --live --arm-live', 'default')), null);
+});
+
+test('the target is part of the key', () => {
+  const one = vettingKeyFor(ev('stripe-x customers del --id cus_1 --live --confirm --account idd', 'default'));
+  const two = vettingKeyFor(ev('stripe-x customers del --id cus_999 --live --confirm --account idd', 'default'));
+  assert.notEqual(one, two);
+  assert.equal(one, canonicalKey({account: 'idd', resource: 'customers', action: 'del', live: true, id: 'cus_1'}));
+});
+
+test('bulk targets are order-insensitive but membership-sensitive', () => {
+  const a = vettingKeyFor(ev('stripe-x customers del --bulk-ids cus_2,cus_1 --live --confirm --account idd', 'default'));
+  const b = vettingKeyFor(ev('stripe-x customers del --bulk-ids cus_1,cus_2 --live --confirm --account idd', 'default'));
+  const c = vettingKeyFor(ev('stripe-x customers del --bulk-ids cus_1,cus_3 --live --confirm --account idd', 'default'));
+  assert.equal(a, b, 'the same set in a different order is the same operation');
+  assert.notEqual(a, c, 'a different set is a different operation');
+});
+
+// --- Divergence between this parse and src/cli.js parseArgs ---
+//
+// A divergence that makes the guard STRICTER than the engine costs a false
+// refusal. One that makes it looser would authorise an operation no gate
+// classified. These pin the cases where the two could plausibly disagree.
+
+test('a value that looks like a flag is swallowed by both parsers alike', () => {
+  // parseArgs takes the next token blindly, so --live here is --account's
+  // VALUE and the call is not live. This parse must agree, or it would name
+  // a live operation the engine will not run (or vice versa).
+  const p = parseEngineCommand('stripe-x customers list --account --live');
+  assert.equal(p.account, '--live');
+  assert.equal(p.live, false);
+});
+
+test('an end-of-options marker is refused rather than guessed at', () => {
+  // parseArgs has no `--` handling and would push it into the resource slot.
+  // Refusing is the fail-closed side of that disagreement.
+  assert.equal(parseEngineCommand('stripe-x -- customers list'), null);
+});
+
+test('a repeated flag resolves last-wins on both sides', () => {
+  const p = parseEngineCommand('stripe-x customers del --account a --account b --id x --id y --live');
+  assert.equal(p.account, 'b');
+  assert.equal(p.id, 'y');
+});
+
+test('parseEngineCommand captures the account and registry as written', () => {
+  const p = parseEngineCommand('stripe-x refunds create --live --account idd --accounts-file /tmp/a.json');
+  assert.equal(p.account, 'idd');
+  assert.equal(p.accountsFile, '/tmp/a.json');
+  assert.equal(p.live, true);
+  assert.equal(p.arm, false);
+  assert.equal(p.resource, 'refunds');
+  assert.equal(p.action, 'create');
 });

@@ -4,7 +4,7 @@ const {resolveRegistryPath, loadRegistry} = require('./registry');
 const {resolveAccount, expandAccounts, isFanOut} = require('./resolver');
 const {classify} = require('./classify');
 const {isArmed, arm} = require('./arming');
-const {issue: issueVet, isVetted} = require('./vetting');
+const {issue: issueVet, isVetted, canonicalKey, ttlSeconds} = require('./vetting');
 const {needsScopeReview, scopeReview} = require('./bulk');
 const {camelizePath, resolveMethod, callStripe} = require('./dispatch');
 const {mapStripeError, aggregate} = require('./errors');
@@ -101,17 +101,39 @@ async function run(argv, ctx) {
     // Requires a controlling terminal. Claude Code's Bash tool has no TTY,
     // so an agent cannot mint a token this way; a human at a terminal can.
     // That distinction is what stops this escape hatch being available to
-    // the very caller the vetting token exists to constrain.
+    // the very caller the vetting token exists to constrain. It is a
+    // presence heuristic and not proof of a human: `script`, `expect` and
+    // Python's pty all defeat it.
     const tty = (ctx && ctx.isTTY !== undefined) ? ctx.isTTY : !!process.stdin.isTTY;
     if (!tty) {
       return {exitCode: EXIT.USAGE,
         stdout: 'REFUSED: `stripe-x vet` must be run interactively from a terminal. '
           + 'Inside Claude Code, the permission guard issues vetting automatically.'};
     }
-    issueVet(env);
+    // Vetting names the one operation it authorises. A blanket session token
+    // would defeat the point: it would prove only that a human vetted
+    // something recently, which is the unbound behaviour this replaced.
+    const vetResource = a._[1];
+    const vetAction = a._[2];
+    if (!vetResource || !vetAction) {
+      return {exitCode: EXIT.USAGE,
+        stdout: 'Usage: stripe-x vet <resource.path> <action> --live [--arm-live] [--account <name>]\n'
+          + 'Vetting authorises exactly one operation. A token for "customers list" never '
+          + 'authorises "refunds create".'};
+    }
+    if (!a.live) {
+      return {exitCode: EXIT.USAGE,
+        stdout: 'Usage error: stripe-x vet requires --live (vetting gates live operations only).'};
+    }
+    const vetKey = canonicalKey({account: a.account || '', accountsFile: a.accountsFile || '',
+      resource: vetResource, action: vetAction, live: true, arm: !!a.armLive,
+      id: a.id, bulkIds: a.bulkIds});
+    issueVet(env, vetKey);
     return {exitCode: EXIT.OK,
-      stdout: 'VETTED: live operations are permitted for this session for the next '
-        + '5 minutes. Re-run `stripe-x vet` to extend.'};
+      stdout: 'VETTED: ' + (a.armLive ? 'arming of' : 'execution of') + ' "' + vetResource + '.'
+        + vetAction + '" in LIVE mode on account "' + (a.account || '(default)') + '" is '
+        + 'authorised for the next ' + ttlSeconds(env) + ' seconds. This token authorises that '
+        + 'operation only.'};
   }
   if (!a.resource || !a.action) {
     return {exitCode: EXIT.USAGE, stdout: 'Usage: stripe-x <resource.path> <action> [flags]'};
@@ -147,6 +169,21 @@ async function run(argv, ctx) {
       return {exitCode: EXIT.USAGE,
         stdout: 'Usage error: --arm-live requires a single --account.'};
     }
+    // Arming is gated in its own right. Without this an obfuscated
+    // `--arm-live` slips underneath the whole scheme: it would arm the
+    // account without any gate having seen it, leaving only the execution
+    // step to defeat. The arm key differs from the execution key, so
+    // approving an arm never silently approves the execution that follows.
+    const armKey = canonicalKey({account: a.account || '', accountsFile: a.accountsFile || '',
+      resource: a.resource, action: a.action, live: true, arm: true,
+      id: a.id, bulkIds: a.bulkIds});
+    if (!isVetted(env, armKey)) {
+      return {exitCode: EXIT.UNVETTED,
+        stdout: 'REFUSED: this arming request carries no vetting token for "' + a.resource + '.'
+          + a.action + '", so no permission gate saw it. Inside Claude Code the guard issues '
+          + 'vetting automatically; from a terminal run `stripe-x vet ' + a.resource + ' '
+          + a.action + ' --live --arm-live` first.'};
+    }
     // Deliberately does not resolve the secret: arming is a local act and
     // resolving here would cost a second 1Password approval per operation.
     arm(names[0], env);
@@ -177,11 +214,18 @@ async function run(argv, ctx) {
       if (!isArmed(accountName, env)) {
         return {exitCode: EXIT.ARM, stdout: 'REFUSED: live mode not armed for "' + accountName + '". Re-run with --arm-live to arm this session.'};
       }
-      if (!isVetted(env)) {
+      // Bound to THIS operation. A token minted for an unrelated read, or
+      // for a different account, resource, action or mode, produces a
+      // different key and does not satisfy this check.
+      const execKey = canonicalKey({account: a.account || '', accountsFile: a.accountsFile || '',
+        resource: a.resource, action: a.action, live: true, arm: false,
+        id: a.id, bulkIds: a.bulkIds});
+      if (!isVetted(env, execKey)) {
         return {exitCode: EXIT.UNVETTED,
-          stdout: 'REFUSED: this live operation carries no vetting token, so no permission '
-            + 'gate saw it. Inside Claude Code the guard issues vetting automatically; from '
-            + 'a terminal run `stripe-x vet` first.'};
+          stdout: 'REFUSED: this live operation carries no vetting token for "' + a.resource + '.'
+            + a.action + '", so no permission gate saw it. Inside Claude Code the guard issues '
+            + 'vetting automatically; from a terminal run `stripe-x vet ' + a.resource + ' '
+            + a.action + ' --live` first.'};
       }
     }
     if (a.bulkIds && a.bulkIds.length) {
@@ -257,10 +301,20 @@ async function run(argv, ctx) {
   return {exitCode: agg.ok ? EXIT.OK : EXIT.ERROR, stdout: JSON.stringify(agg, null, 2)};
 }
 
+// The bundled Stripe CLI is a general-purpose client: `cli post /v1/refunds`
+// moves real money. Until this was gated it returned before classification,
+// arming and vetting were ever reached, and the only live restriction was a
+// block on the single literal subcommand `trigger` - while still resolving
+// the live key and handing it over.
+//
+// It now carries the SAME gates as the engine's own dispatch path, in the
+// same order (ARM 12 -> VETTED 15 -> CONFIRM 10), rather than a lighter set
+// of its own. A separate, more permissive rule set for the bridge is exactly
+// the kind of exception list that produced eight of this repo's bypasses.
 async function runCliBridge(a, env, ctx) {
   const {resolveRegistryPath, loadRegistry} = require('./registry');
   const {resolveAccount} = require('./resolver');
-  const {buildCliArgs, blocksTriggerInLive, resolveCliBinary} = require('./cli_bridge');
+  const {buildCliArgs, blocksTriggerInLive, resolveCliBinary, classifyCliSub} = require('./cli_bridge');
   const fs = require('node:fs');
   const path = require('node:path');
 
@@ -271,21 +325,66 @@ async function runCliBridge(a, env, ctx) {
     return {exitCode: EXIT.ERROR, stdout: JSON.stringify({error: {message: e.message}})};
   }
 
-  let d;
-  try {
-    d = resolveAccount(reg, a.account || reg.default_account, {live: !!a.live, env: env, opRunner: ctx && ctx.opRunner});
-  } catch (e) {
-    return {exitCode: EXIT.ERROR, stdout: JSON.stringify({error: {message: e.message}})};
-  }
-
   const cliArgs = a._.slice(1);
   if (cliArgs.length === 0) {
     return {exitCode: EXIT.USAGE, stdout: 'Usage: stripe-x cli <stripe-cli-subcommand> [args] --account <name> [--live]'};
   }
 
   const sub = cliArgs[0];
-  if (blocksTriggerInLive(sub, d.mode)) {
+  const mode = a.live ? 'live' : 'test';
+  if (blocksTriggerInLive(sub, mode)) {
     return {exitCode: EXIT.ERROR, stdout: 'REFUSED: "stripe ' + sub + '" is blocked in live mode (test-mode events only). Re-run without --live.'};
+  }
+
+  // Known from the registry and the --live flag alone. Every refusal and the
+  // preview below returns before resolveAccount, so a refused or previewed
+  // bridge call costs no 1Password read, matching run()'s behaviour.
+  const accountName = a.account || reg.default_account;
+  const cls = classifyCliSub(sub);
+
+  if (a.armLive) {
+    if (!a.live) {
+      return {exitCode: EXIT.USAGE,
+        stdout: 'Usage error: --arm-live requires --live (arming only affects live mode).'};
+    }
+    const bridgeArmKey = canonicalKey({account: a.account || '', accountsFile: a.accountsFile || '',
+      resource: 'cli', action: sub, live: true, arm: true, id: a.id, bulkIds: a.bulkIds});
+    if (!isVetted(env, bridgeArmKey)) {
+      return {exitCode: EXIT.UNVETTED,
+        stdout: 'REFUSED: this arming request carries no vetting token for "cli ' + sub + '", so '
+          + 'no permission gate saw it. Inside Claude Code the guard issues vetting '
+          + 'automatically; from a terminal run `stripe-x vet cli ' + sub + ' --live --arm-live` first.'};
+    }
+    arm(accountName, env);
+    return {exitCode: EXIT.ARMED,
+      stdout: 'ARMED: live mode armed for "' + accountName + '" for this session. '
+        + 'Re-run with --live --confirm to execute.'};
+  }
+
+  if (cls !== 'read') {
+    if (a.live) {
+      if (!isArmed(accountName, env)) {
+        return {exitCode: EXIT.ARM,
+          stdout: 'REFUSED: live mode not armed for "' + accountName + '". Re-run with --arm-live to arm this session.'};
+      }
+      const bridgeKey = canonicalKey({account: a.account || '', accountsFile: a.accountsFile || '',
+        resource: 'cli', action: sub, live: true, arm: false, id: a.id, bulkIds: a.bulkIds});
+      if (!isVetted(env, bridgeKey)) {
+        return {exitCode: EXIT.UNVETTED,
+          stdout: 'REFUSED: this live Stripe CLI call carries no vetting token for "cli ' + sub
+            + '", so no permission gate saw it. Inside Claude Code the guard issues vetting '
+            + 'automatically; from a terminal run `stripe-x vet cli ' + sub + ' --live` first.'};
+      }
+    }
+    if (!a.confirm) {
+      return {exitCode: EXIT.CONFIRM,
+        stdout: 'CONFIRMATION REQUIRED\n'
+          + 'account: ' + accountName + '\nmode: ' + mode.toUpperCase() + '\n'
+          + 'operation: stripe CLI "' + cliArgs.join(' ') + '"\nclass: ' + cls + '\n'
+          + 'The bundled Stripe CLI receives a resolved API key for this account and its '
+          + 'surface is not modelled by this engine.\n'
+          + 'Re-run with --confirm to execute.'};
+    }
   }
 
   let version;
@@ -298,6 +397,14 @@ async function runCliBridge(a, env, ctx) {
   const bin = resolveCliBinary(env, version);
   if (!fs.existsSync(bin)) {
     return {exitCode: EXIT.ERROR, stdout: 'Stripe CLI not provisioned at ' + bin + '. Run /stripe:stripe-setup (or let the SessionStart hook provision it).'};
+  }
+
+  // Last act before spawning, so nothing above this line costs a secret read.
+  let d;
+  try {
+    d = resolveAccount(reg, accountName, {live: !!a.live, env: env, opRunner: ctx && ctx.opRunner});
+  } catch (e) {
+    return {exitCode: EXIT.ERROR, stdout: JSON.stringify({error: {message: e.message}})};
   }
 
   const args = buildCliArgs(cliArgs, {apiKey: d.apiKey, stripeAccount: d.stripeAccount});
