@@ -4,19 +4,29 @@
 //
 // Design note (2026-08-01): this is an ALLOWLIST, and that is deliberate.
 // An earlier blocklist version assumed a command was safe and hunted for
-// danger. It was defeated five separate times by ordinary shell behaviour:
-// --li"ve" reassembles to --live, st"ripe-x" reassembles to stripe-x,
-// --li\ve reassembles to --live, and STRIPE-X resolves to the same binary on
-// a case-insensitive filesystem. Deciding safety from raw shell text means
-// out-guessing the shell, which is not a winnable game. So the invariant is
-// inverted:
+// danger. It was defeated repeatedly by ordinary shell behaviour: --li"ve"
+// reassembles to --live, st"ripe-x" to stripe-x, --li\ve to --live, and
+// STRIPE-X resolves to the same binary on a case-insensitive filesystem.
+// Deciding safety from raw shell text means out-guessing the shell, which is
+// not a winnable game. So the invariant is inverted:
 //
-//   `defer` must be EARNED by proving a command is simple and read-only.
-//   Anything that looks live      -> deny.
-//   Anything merely unparseable   -> ask.
+//   `defer` must be EARNED by proving a command is a single, simple,
+//   read-only engine invocation.
+//   Anything that looks live     -> deny.
+//   Anything merely unparseable  -> ask.
 //
-// Nothing that touches the engine in a non-prompting mode reaches `defer`
-// without passing every check below.
+// Two assumptions that the earlier version made silently, and that this
+// version verifies explicitly, because each one hid a live bypass:
+//
+//   1. That the text has been reduced the way the shell would reduce it.
+//      Handled by normalize(), which folds quotes, backslashes, $ and case
+//      before any decision is taken.
+//   2. That the command contains exactly ONE engine invocation. The parse
+//      below reads the first resource/action pair after the first engine
+//      token; a second invocation chained with |, &, or a newline would
+//      otherwise be classified by the FIRST command and could reach defer.
+//      A chained `stripe-x refunds list | stripe-x accounts del --id X`
+//      did exactly that, running a destructive delete with no prompt.
 const {classify} = require('../src/classify');
 const {camelizePath} = require('../src/dispatch');
 
@@ -32,11 +42,20 @@ const PROMPTING = new Set(['default', 'plan', 'acceptEdits']);
 const VALUE_FLAGS = new Set(['--account', '--id', '--params', '--data', '--expand',
   '--limit', '--idempotency-key', '--api-version', '--bulk-ids', '--accounts-file']);
 
+// Flags the engine recognises that take no value. Any other hyphen-prefixed
+// token means this guard and the real parseArgs would disagree about which
+// tokens are positional, so we refuse to guess.
+const BOOLEAN_FLAGS = new Set(['--live', '--confirm', '--confirm-bulk', '--arm-live',
+  '--all', '--table']);
+
 // Any match means we cannot reconstruct what the shell will actually run:
-// quoting and escaping, parameter or command expansion, chaining, nested
-// shells. The `eval`, `bash`, `sh` and `zsh` alternatives below are string
-// patterns being matched against the command text, not invocations.
-const UNPARSEABLE = /['"\\$`]|(^|\s)eval(\s|$)|;|&&|\|\||(^|\s)(bash|sh|zsh)\s+-/;
+// quoting and escaping, parameter or command expansion, chaining or
+// backgrounding, or a nested shell. The character class covers pipe,
+// ampersand, semicolon, newline and carriage return, so both the single and
+// doubled forms of the chaining operators are caught. The `eval`, `bash`,
+// `sh` and `zsh` alternatives are string patterns matched against command
+// text, not code invocations.
+const UNPARSEABLE = /['"\\$`]|[|&;\n\r]|(^|\s)eval(\s|$)|(^|\s)(bash|sh|zsh)\s+-/i;
 
 function defer() {
   return {permissionDecision: 'defer'};
@@ -50,17 +69,21 @@ function ask(reason) {
   return {permissionDecision: 'ask', permissionDecisionReason: reason};
 }
 
-// Approximates shell quote removal plus a case-folding filesystem, so that
-// --li"ve", --li\ve and --LIVE all collapse to the same text we test against.
-// This is the single check that replaces the entire family of shape-specific
-// bypass patches the blocklist design kept needing.
+// Approximates shell quote removal, escape removal and a case-folding
+// filesystem, so --li"ve", --li\ve, --li$'v'e and --LIVE all collapse to the
+// same text we test against. This single reduction replaces the family of
+// shape-specific patches the blocklist design kept needing.
 function normalize(cmd) {
-  return cmd.replace(/['"\\]/g, '').toLowerCase();
+  return cmd.replace(/['"\\$]/g, '').toLowerCase();
 }
 
 function isEngineToken(t) {
   const s = t.toLowerCase();
   return s === ENGINE || s.endsWith('/' + ENGINE);
+}
+
+function countEngineMentions(normalized) {
+  return normalized.split(ENGINE).length - 1;
 }
 
 function _decide(input) {
@@ -77,11 +100,18 @@ function _decide(input) {
 
   // Past this point the command touches the engine in a mode that will not
   // prompt on its own. Every remaining branch must resolve to deny or ask,
-  // except the two that positively prove the command is read-only.
+  // except the two that positively prove the command is one simple read.
 
   if (normalized.indexOf('--live') !== -1) {
     return deny('Live Stripe calls are refused while Claude Code is in a non-prompting '
       + 'permission mode. Relaunch in default mode to run this.');
+  }
+
+  // Verify the single-invocation assumption the parse below depends on.
+  if (countEngineMentions(normalized) !== 1) {
+    return ask('This command contains more than one Stripe engine invocation, which cannot '
+      + 'be verified as a whole while Claude Code is in a non-prompting permission mode. '
+      + 'Confirm before running.');
   }
 
   if (UNPARSEABLE.test(cmd)) {
@@ -97,19 +127,26 @@ function _decide(input) {
       + 'non-prompting permission mode. Confirm before running.');
   }
 
+  const unclear = ask('The Stripe operation could not be determined while Claude Code is in '
+    + 'a non-prompting permission mode. Confirm before running.');
+
   const rest = tokens.slice(i + 1);
   const positional = [];
   for (let j = 0; j < rest.length; j++) {
     const t = rest[j];
     if (t.charAt(0) === '-') {
-      if (VALUE_FLAGS.has(t)) j++;
+      if (VALUE_FLAGS.has(t)) {
+        j++;
+        continue;
+      }
+      // An unrecognised hyphen-prefixed token is positional to the real
+      // parseArgs but would be skipped here, so the two would disagree about
+      // what the resource and action are. Refuse to guess.
+      if (!BOOLEAN_FLAGS.has(t)) return unclear;
       continue;
     }
     positional.push(t);
   }
-
-  const unclear = ask('The Stripe operation could not be determined while Claude Code is in '
-    + 'a non-prompting permission mode. Confirm before running.');
 
   const resource = positional[0];
   if (!resource) return unclear;

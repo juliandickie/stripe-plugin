@@ -159,3 +159,32 @@ test('defer is reachable only for a provably simple read', () => {
   // Same read, but quoted, so simplicity cannot be proven.
   assert.equal(decide(ev('"stripe-x" customers list', 'auto')).permissionDecision, 'ask');
 });
+
+test('a chained second engine invocation is never classified by the first', () => {
+  for (const c of [
+    'stripe-x refunds list | stripe-x accounts del --id acct_123 --confirm',
+    'stripe-x customers list | stripe-x customers del --id cus_123 --confirm',
+    'stripe-x refunds list\nstripe-x accounts del --id acct_123 --confirm',
+    'stripe-x refunds list & stripe-x accounts del --id acct_123 --confirm',
+    'stripe-x help refunds | stripe-x accounts del --id acct_123 --confirm',
+    'stripe-x a list | stripe-x b list | stripe-x accounts del --id x'
+  ]) {
+    assert.equal(decide(ev(c, 'auto')).permissionDecision, 'ask', c);
+  }
+});
+
+test('ANSI-C quoting reconstructs to --live and is denied', () => {
+  assert.equal(decide(ev("stripe-x refunds create --li$'v'e --confirm", 'auto')).permissionDecision, 'deny');
+  assert.equal(decide(ev('stripe-x refunds create --li$"v"e', 'auto')).permissionDecision, 'deny');
+});
+
+test('an unrecognised hyphen token is not silently skipped', () => {
+  assert.equal(decide(ev('stripe-x --bogus help customers', 'auto')).permissionDecision, 'ask');
+  assert.equal(decide(ev('stripe-x --bogus customers list', 'auto')).permissionDecision, 'ask');
+});
+
+test('the single-read defer path still works with real flags', () => {
+  assert.equal(decide(ev('stripe-x charges retrieve --id ch_1 --expand data', 'auto')).permissionDecision, 'defer');
+  assert.equal(decide(ev('stripe-x paymentIntents list --limit 5', 'auto')).permissionDecision, 'defer');
+  assert.equal(decide(ev('stripe-x customers list --account idd --table', 'auto')).permissionDecision, 'defer');
+});
