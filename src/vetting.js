@@ -14,9 +14,19 @@
 // requires positive proof that some permission gate saw the call at all:
 //
 //   A live mutating or destructive operation requires a vetting token.
-//   No token means refusal. The obfuscated invocation produces no token,
-//   because the guard never recognised it, so it is refused in every
-//   permission mode rather than only in the ones the guard understood.
+//   No token means refusal.
+//
+// KNOWN GAP, READ BEFORE RELYING ON THIS. The token below is scoped to the
+// session and a time window, NOT to the individual call. It proves only that
+// some recognised stripe-x invocation happened recently, and ordinary read
+// traffic keeps that true almost continuously, so it does not prove that this
+// particular operation was seen by a gate. Two consequences follow: an
+// obfuscated invocation can still execute while a token from an unrelated
+// read is warm, and `--arm-live` returns before the check runs at all.
+// Closing this means binding the token to a canonical key that the guard and
+// the engine compute independently from the account, resource, action and
+// live flag, so a token for `customers list` cannot authorise
+// `refunds create --live`. Tracked in docs/SESSION-HANDOFF-2026-08-02.md.
 //
 // Tokens come from exactly two places:
 //   1. The PreToolUse guard, whenever it recognises a stripe-x invocation and

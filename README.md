@@ -27,7 +27,9 @@ Three classes enforced inside the engine binary: reads run immediately; mutating
 
 The engine enforces all of the above, but it cannot defend against a caller that writes its own flags. A `PreToolUse` hook is a required second layer that reads the harness permission mode and denies or escalates stripe-x calls Claude Code would otherwise run unattended (see Security below).
 
-Live mutating and destructive operations also require a vetting token, proof that some permission gate saw the call, on top of arming. Inside Claude Code the `PreToolUse` guard issues one automatically for any stripe-x invocation it recognises and does not deny, so this needs no separate step. Working directly in a terminal, run `stripe-x vet` first; it requires a real terminal (a TTY) and refuses otherwise, so an unattended agent cannot mint one for itself. A live call carrying no token is refused, exit code 15.
+Live mutating and destructive operations also require a vetting token, proof that some permission gate saw the call, on top of arming. Inside Claude Code the `PreToolUse` guard issues one automatically for any stripe-x invocation it recognises and does not deny, so this needs no separate step. Working directly in a terminal, run `stripe-x vet` first; it requires a real terminal (a TTY) and refuses otherwise. A live call carrying no token is refused, exit code 15.
+
+Be clear about what this layer does and does not give you. The token is scoped to the session and a five minute window, not to the individual call, so it proves that some recognised stripe-x invocation happened recently rather than that this one did. Ordinary read traffic keeps that true almost continuously. The TTY requirement on `stripe-x vet` is a presence heuristic, not proof of a human, and tools such as `script` and `expect` defeat it. Treat the guard and the vetting token as a strong speed bump against a careless or lightly injected caller, not as a hard boundary against a determined one.
 
 ## What you get
 
