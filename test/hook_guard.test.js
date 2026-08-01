@@ -54,15 +54,22 @@ test('the cli bridge is treated as at least mutating', () => {
   assert.equal(decide(ev('stripe-x cli trigger payment_intent.succeeded', 'auto')).permissionDecision, 'ask');
 });
 
-test('shell ambiguity denies rather than allows', () => {
+test('shell ambiguity with a live flag still denies', () => {
   for (const c of [
     'stripe-x customers list; stripe-x refunds create --live --confirm',
+    'eval "stripe-x refunds create --live --confirm"'
+  ]) {
+    assert.equal(decide(ev(c, 'auto')).permissionDecision, 'deny', c);
+  }
+});
+
+test('shell ambiguity without a live flag asks rather than allows', () => {
+  for (const c of [
     'stripe-x customers list && rm -rf /',
-    'eval "stripe-x refunds create --live --confirm"',
     'stripe-x refunds create $(cat flags.txt)',
     'stripe-x refunds create `cat flags.txt`'
   ]) {
-    assert.equal(decide(ev(c, 'auto')).permissionDecision, 'deny', c);
+    assert.equal(decide(ev(c, 'auto')).permissionDecision, 'ask', c);
   }
 });
 
@@ -91,8 +98,8 @@ test('a quoted engine token cannot smuggle a live call past the guard', () => {
   }
 });
 
-test('a quoted engine token on a read still classifies rather than failing closed', () => {
-  assert.equal(decide(ev('"stripe-x" customers list --account idd', 'auto')).permissionDecision, 'defer');
+test('a quoted engine token on a read cannot be proven simple, so it asks', () => {
+  assert.equal(decide(ev('"stripe-x" customers list --account idd', 'auto')).permissionDecision, 'ask');
 });
 
 test('mentioning the engine while unlocatable fails closed', () => {
@@ -105,8 +112,8 @@ test('a value-taking flag does not shift the positional parse', () => {
   assert.equal(decide(ev('stripe-x --account idd customers list', 'auto')).permissionDecision, 'defer');
 });
 
-test('a missing action denies rather than throwing', () => {
-  assert.equal(decide(ev('stripe-x customers', 'auto')).permissionDecision, 'deny');
+test('a missing action asks rather than throwing', () => {
+  assert.equal(decide(ev('stripe-x customers', 'auto')).permissionDecision, 'ask');
 });
 
 test('the reason never echoes the command', () => {
@@ -118,4 +125,37 @@ test('the reason never echoes the command', () => {
 test('malformed input defers rather than blocking every Bash call', () => {
   assert.equal(decide(null).permissionDecision, 'defer');
   assert.equal(decide({}).permissionDecision, 'defer');
+});
+
+test('quote splicing inside a token cannot smuggle a live call', () => {
+  for (const c of [
+    'stripe-x refunds create --account idd --li"ve" --confirm',
+    "stripe-x refunds create --li've' --confirm",
+    'stripe-x refunds create --li\\ve --confirm'
+  ]) {
+    assert.equal(decide(ev(c, 'auto')).permissionDecision, 'deny', c);
+  }
+});
+
+test('splicing the engine name itself cannot evade the guard', () => {
+  const c = 'st"ripe-x" refunds create --account idd --live --confirm';
+  assert.equal(decide(ev(c, 'auto')).permissionDecision, 'deny', c);
+});
+
+test('a case-variant engine name is still the engine', () => {
+  assert.equal(decide(ev('STRIPE-X refunds create --live --confirm', 'auto')).permissionDecision, 'deny');
+  assert.equal(decide(ev('Stripe-X refunds create --LIVE', 'auto')).permissionDecision, 'deny');
+});
+
+test('a nested shell with a spliced live flag is still denied', () => {
+  const c = '/bin/bash -c \'stripe-x refunds create --li"ve" --confirm\'';
+  assert.equal(decide(ev(c, 'auto')).permissionDecision, 'deny', c);
+});
+
+test('defer is reachable only for a provably simple read', () => {
+  assert.equal(decide(ev('stripe-x customers list --account idd', 'auto')).permissionDecision, 'defer');
+  assert.equal(decide(ev('stripe-x --account idd customers list', 'auto')).permissionDecision, 'defer');
+  assert.equal(decide(ev('stripe-x help customers', 'auto')).permissionDecision, 'defer');
+  // Same read, but quoted, so simplicity cannot be proven.
+  assert.equal(decide(ev('"stripe-x" customers list', 'auto')).permissionDecision, 'ask');
 });
