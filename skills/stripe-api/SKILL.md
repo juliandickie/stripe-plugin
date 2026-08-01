@@ -27,7 +27,7 @@ ${CLAUDE_PLUGIN_ROOT}/bin/stripe-x <resource.path> <action> \
 
 2. Writes need a single `--account`. The engine prints a CONFIRMATION REQUIRED preview and exits without calling Stripe unless `--confirm` is passed. Relay the preview to the user and only re-run with `--confirm` after they approve.
 
-3. Test mode is default. Live mode needs `--live`. The first live write per account per session also needs `--arm-live`. Never add `--live --arm-live --confirm` together on the user's behalf without explicit approval in the same turn.
+3. Test mode is default. Live mode needs `--live`. Arming is a separate call: `--live --arm-live` arms the session for that account and exits 14 without executing. Only then does `--live --confirm` run the operation, and only with explicit approval in the same turn.
 
 4. Bulk writes use `--bulk-ids id1,id2,...`. Over the threshold the engine returns a scope review listing every target; relay it and only proceed with `--confirm-bulk` after approval.
 
