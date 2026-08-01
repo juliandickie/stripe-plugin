@@ -1,16 +1,9 @@
 'use strict';
+const {resolveSecretRef} = require('./secrets');
 
-function sourceSecret(value, env) {
-  if (typeof value !== 'string' || value.length === 0) {
-    throw new Error('Missing secret key value in registry.');
-  }
-  if (value.startsWith('env:')) {
-    const name = value.slice(4);
-    const v = env[name];
-    if (v == null || v === '') throw new Error('Environment variable ' + name + ' is not set or is empty (referenced by registry).');
-    return v;
-  }
-  return value;
+function sourceSecret(value, env, opts) {
+  const o = opts || {};
+  return resolveSecretRef(value, {env: env, opAccount: o.opAccount, opRunner: o.opRunner});
 }
 
 function pickKey(acct, live) {
@@ -30,7 +23,12 @@ function resolveAccount(reg, name, opts) {
   }
   const mode = opts.live ? 'live' : 'test';
   if (acct.type === 'standalone') {
-    return {name: accountName, mode, apiKey: sourceSecret(pickKey(acct, opts.live), opts.env), stripeAccount: undefined};
+    return {
+      name: accountName, mode,
+      apiKey: sourceSecret(pickKey(acct, opts.live), opts.env,
+        {opAccount: acct.op_account, opRunner: opts.opRunner}),
+      stripeAccount: undefined
+    };
   }
   if (acct.type === 'connect') {
     const platform = reg.accounts[acct.platform];
@@ -42,7 +40,10 @@ function resolveAccount(reg, name, opts) {
     }
     return {
       name: accountName, mode,
-      apiKey: sourceSecret(pickKey(platform, opts.live), opts.env),
+      // The key belongs to the platform, so the 1Password account selector
+      // must come from the platform record, not the connect record.
+      apiKey: sourceSecret(pickKey(platform, opts.live), opts.env,
+        {opAccount: platform.op_account, opRunner: opts.opRunner}),
       stripeAccount: acct.connected_account
     };
   }

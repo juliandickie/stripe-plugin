@@ -13,7 +13,7 @@ Then run `/stripe:stripe-setup` to create the accounts registry and provision th
 
 ## Accounts
 
-Accounts live in a JSON registry (default `${CLAUDE_PLUGIN_DATA}/stripe-x/accounts.json`, `chmod 600`, gitignored). Each entry is `standalone` (its own test and live keys) or `connect` (a platform profile plus a connected account id). Live keys should use `env:VAR_NAME` indirection.
+Accounts live in a JSON registry (default `${CLAUDE_PLUGIN_DATA}/stripe-x/accounts.json`, `chmod 600`, gitignored). Each entry is `standalone` (its own test and live keys) or `connect` (a platform profile plus a connected account id). Keys are references, never plaintext: test keys may use `env:VAR_NAME` indirection; live keys must be a 1Password reference (`op://Vault/Item/field`).
 
 ## Safety
 

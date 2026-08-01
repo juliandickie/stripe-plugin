@@ -66,7 +66,7 @@ test('listAccounts returns no secret values', () => {
   const d = path.join(os.tmpdir(), 'shimacct-' + Math.random().toString(16).slice(2));
   fs.mkdirSync(path.join(d, 'stripe-x'), {recursive: true});
   const rp = path.join(d, 'stripe-x', 'accounts.json');
-  fs.writeFileSync(rp, JSON.stringify({default_account: 'x', accounts: {x: {type: 'standalone', label: 'X', test_secret_key: 'sk_test_SECRETVAL', live_secret_key: 'sk_live_SECRETVAL'}}}));
+  fs.writeFileSync(rp, JSON.stringify({default_account: 'x', accounts: {x: {type: 'standalone', label: 'X', test_secret_key: 'env:T', live_secret_key: 'op://V/I/live'}}}));
   const res = listAccounts({CLAUDE_PLUGIN_DATA: d});
   const json = JSON.stringify(res);
   assert.ok(!json.includes('sk_test_SECRETVAL') && !json.includes('sk_live_SECRETVAL'));

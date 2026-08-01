@@ -61,6 +61,9 @@ async function run(argv, ctx) {
   const env = (ctx && ctx.env) || process.env;
   const stripeFactory = (ctx && ctx.stripeFactory) ||
     ((cfg) => new Stripe(cfg.apiKey, cfg.apiVersion ? {apiVersion: cfg.apiVersion} : {}));
+  // Mirrors stripeFactory just above: undefined in production (resolveAccount
+  // then uses the real `op` binary); tests inject a stub here instead.
+  const opRunner = ctx && ctx.opRunner;
   let a;
   try {
     a = parseArgs(argv);
@@ -121,7 +124,7 @@ async function run(argv, ctx) {
     options: a.idempotencyKey ? {idempotencyKey: a.idempotencyKey} : {}};
 
   if (!isFanOut(names) && cls !== 'read') {
-    const d = resolveAccount(reg, names[0], {live: !!a.live, env: env});
+    const d = resolveAccount(reg, names[0], {live: !!a.live, env: env, opRunner: opRunner});
     if (a.live && (cls === 'mutating' || cls === 'destructive')) {
       if (a.armLive) arm(d.name, env);
       if (!isArmed(d.name, env)) {
@@ -179,7 +182,7 @@ async function run(argv, ctx) {
   const results = [];
   for (const n of names) {
     try {
-      const d = resolveAccount(reg, n, {live: !!a.live, env: env});
+      const d = resolveAccount(reg, n, {live: !!a.live, env: env, opRunner: opRunner});
       const client = stripeFactory({apiKey: d.apiKey, apiVersion: a.apiVersion});
       const r2 = Object.assign({}, req, {options: Object.assign({}, req.options)});
       if (d.stripeAccount) r2.options.stripeAccount = d.stripeAccount;
@@ -214,7 +217,7 @@ async function runCliBridge(a, env, ctx) {
 
   let d;
   try {
-    d = resolveAccount(reg, a.account || reg.default_account, {live: !!a.live, env: env});
+    d = resolveAccount(reg, a.account || reg.default_account, {live: !!a.live, env: env, opRunner: ctx && ctx.opRunner});
   } catch (e) {
     return {exitCode: EXIT.ERROR, stdout: JSON.stringify({error: {message: e.message}})};
   }

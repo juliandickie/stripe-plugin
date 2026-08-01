@@ -24,7 +24,7 @@ Configure the multi-account registry and provision the Stripe CLI. This skill is
          "type": "standalone",
          "label": "Example business",
          "test_secret_key": "env:STRIPE_EXAMPLE_TEST",
-         "live_secret_key": "env:STRIPE_EXAMPLE_LIVE"
+         "live_secret_key": "op://Vault/StripeExample/live"
        },
        "example-connect": {
          "type": "connect",
@@ -36,7 +36,7 @@ Configure the multi-account registry and provision the Stripe CLI. This skill is
    }
    ```
 
-3. Recommend `env:` indirection for every live key. Explain that a literal `sk_live_` in the file is accepted only with `chmod 600` and that `docs/` and the registry path are gitignored.
+3. Test keys may use `env:VAR_NAME` indirection. Live keys must be a 1Password reference (`op://Vault/Item/field`): the engine refuses a plaintext secret and refuses `env:` for a live key at load time, regardless of file permissions. Explain that `docs/` and the registry path are gitignored, and the file should still be `chmod 600`.
 
 4. Provision the Stripe CLI by running `${CLAUDE_PLUGIN_ROOT}/scripts/install-stripe-cli.sh`.
 
