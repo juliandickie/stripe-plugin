@@ -15,3 +15,6 @@ accounts.json
 # OS noise
 .DS_Store
 Thumbs.db
+
+# Subagent-driven-development scratch (progress ledger, task briefs)
+.superpowers/
