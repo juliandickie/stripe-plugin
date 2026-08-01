@@ -131,13 +131,61 @@ test('buildParams does not pollute Object.prototype via --data', async () => {
   assert.equal(r.exitCode, 10);
 });
 
-test('live mutating with --arm-live and --confirm executes (positive armed path)', async () => {
+test('--arm-live arms and exits without executing (exit 14)', async () => {
   const s = setup(ACCOUNTS);
   const rec = [];
-  const r = await run(['customers', 'create', '--account', 'idd', '--data', 'email=a@b.co', '--live', '--arm-live', '--confirm', '--accounts-file', s.regPath],
-    {env: {CLAUDE_PLUGIN_DATA: s.dir, CLAUDE_SESSION_ID: 'sess-1', IDD_TEST: 'sk_test_idd'}, stripeFactory: fakeFactory(rec), opRunner: OP});
+  const r = await run(['customers', 'create', '--account', 'idd', '--data', 'email=a@b.co',
+    '--live', '--arm-live', '--accounts-file', s.regPath],
+    {env: {CLAUDE_PLUGIN_DATA: s.dir, CLAUDE_SESSION_ID: 'sess-arm', IDD_TEST: 'sk_test_idd'},
+     stripeFactory: fakeFactory(rec), opRunner: OP});
+  assert.equal(r.exitCode, 14);
+  assert.match(r.stdout, /ARMED/);
+  assert.equal(rec.length, 0);
+});
+
+test('REGRESSION: --live --arm-live --confirm must NOT execute in one call', async () => {
+  const s = setup(ACCOUNTS);
+  const rec = [];
+  const r = await run(['refunds', 'create', '--account', 'idd', '--data', 'charge=ch_1',
+    '--live', '--arm-live', '--confirm', '--accounts-file', s.regPath],
+    {env: {CLAUDE_PLUGIN_DATA: s.dir, CLAUDE_SESSION_ID: 'sess-oneshot', IDD_TEST: 'sk_test_idd'},
+     stripeFactory: fakeFactory(rec), opRunner: OP});
+  assert.equal(r.exitCode, 14);
+  assert.equal(rec.length, 0, 'the one-shot live path must be closed');
+});
+
+test('arm then execute across two calls does execute', async () => {
+  const s = setup(ACCOUNTS);
+  const rec = [];
+  const ctx = {env: {CLAUDE_PLUGIN_DATA: s.dir, CLAUDE_SESSION_ID: 'sess-two', IDD_TEST: 'sk_test_idd'},
+    stripeFactory: fakeFactory(rec), opRunner: OP};
+  const armed = await run(['customers', 'create', '--account', 'idd',
+    '--live', '--arm-live', '--accounts-file', s.regPath], ctx);
+  assert.equal(armed.exitCode, 14);
+  assert.equal(rec.length, 0);
+  const r = await run(['customers', 'create', '--account', 'idd', '--data', 'email=a@b.co',
+    '--live', '--confirm', '--accounts-file', s.regPath], ctx);
   assert.equal(r.exitCode, 0);
+  assert.equal(rec.length, 1);
   assert.equal(rec[0].apiKey, 'sk_live_idd');
+});
+
+test('--arm-live without --live is a usage error', async () => {
+  const s = setup(ACCOUNTS);
+  const r = await run(['customers', 'create', '--account', 'idd', '--arm-live',
+    '--accounts-file', s.regPath],
+    {env: {CLAUDE_PLUGIN_DATA: s.dir, IDD_TEST: 'sk_test_idd'}});
+  assert.equal(r.exitCode, 2);
+  assert.match(r.stdout, /requires --live/);
+});
+
+test('--arm-live across a fan-out is a usage error', async () => {
+  const s = setup(ACCOUNTS);
+  const r = await run(['customers', 'create', '--account', 'all', '--live', '--arm-live',
+    '--accounts-file', s.regPath],
+    {env: {CLAUDE_PLUGIN_DATA: s.dir, IDD_TEST: 'sk_test_idd'}});
+  assert.equal(r.exitCode, 2);
+  assert.match(r.stdout, /single --account/);
 });
 
 test('invalid --params JSON returns USAGE (exit 2), not a crash', async () => {

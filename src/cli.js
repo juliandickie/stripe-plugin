@@ -8,7 +8,7 @@ const {needsScopeReview, scopeReview} = require('./bulk');
 const {camelizePath, resolveMethod, callStripe} = require('./dispatch');
 const {mapStripeError, aggregate} = require('./errors');
 
-const EXIT = {OK: 0, ERROR: 1, USAGE: 2, CONFIRM: 10, BULK: 11, ARM: 12, FANOUT: 13};
+const EXIT = {OK: 0, ERROR: 1, USAGE: 2, CONFIRM: 10, BULK: 11, ARM: 12, FANOUT: 13, ARMED: 14};
 
 function parseArgs(argv) {
   const a = {data: {}, expand: [], _: []};
@@ -115,6 +115,28 @@ async function run(argv, ctx) {
     return {exitCode: EXIT.ERROR, stdout: JSON.stringify({error: {message: e.message}})};
   }
 
+  // Arming is its own invocation. It never executes, even with --confirm,
+  // so live execution always costs two separate tool calls and therefore
+  // two separate permission prompts. Handled before the read/write split
+  // so that --arm-live on a read is a clear usage error rather than a
+  // silent no-op.
+  if (a.armLive) {
+    if (!a.live) {
+      return {exitCode: EXIT.USAGE,
+        stdout: 'Usage error: --arm-live requires --live (arming only affects live mode).'};
+    }
+    if (isFanOut(names)) {
+      return {exitCode: EXIT.USAGE,
+        stdout: 'Usage error: --arm-live requires a single --account.'};
+    }
+    // Deliberately does not resolve the secret: arming is a local act and
+    // resolving here would cost a second 1Password approval per operation.
+    arm(names[0], env);
+    return {exitCode: EXIT.ARMED,
+      stdout: 'ARMED: live mode armed for "' + names[0] + '" for this session. '
+        + 'Re-run with --live --confirm to execute.'};
+  }
+
   if (isFanOut(names) && cls !== 'read') {
     return {exitCode: EXIT.FANOUT, stdout: 'REFUSED: multi-account fan-out refuses ' + cls + ' actions. Use a single --account for writes.'};
   }
@@ -126,7 +148,6 @@ async function run(argv, ctx) {
   if (!isFanOut(names) && cls !== 'read') {
     const d = resolveAccount(reg, names[0], {live: !!a.live, env: env, opRunner: opRunner});
     if (a.live && (cls === 'mutating' || cls === 'destructive')) {
-      if (a.armLive) arm(d.name, env);
       if (!isArmed(d.name, env)) {
         return {exitCode: EXIT.ARM, stdout: 'REFUSED: live mode not armed for "' + d.name + '". Re-run with --arm-live to arm this session.'};
       }
