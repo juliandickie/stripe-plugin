@@ -4,6 +4,10 @@ All notable changes to the stripe plugin are recorded here.
 
 ## Unreleased
 
+## 0.2.0 - 2026-08-02
+
+Credential and permission hardening. Answers an external security question from 2026-07-29 about what enforces the boundary between an agent's decision and execution of a destructive Stripe call. Four breaking changes, all listed below.
+
 - Breaking - the accounts registry no longer accepts plaintext secret values. `test_secret_key` and `live_secret_key` now hold a reference only: `op://Vault/Item/field` (1Password, valid for either key) or `env:NAME` (valid for test keys only). A plaintext secret, or an `env:` live key, is refused at registry load. An optional `op_account` per account selects among multiple signed-in 1Password accounts; for a Connect account both the key and `op_account` come from its platform record. No keychain backend.
 
 - `--arm-live` now arms and exits (exit code 14) instead of arming and continuing in the same call. It requires `--live` and a single `--account`, each otherwise a usage error (exit 2). Arming and executing can therefore never happen in the same process: a `--live --arm-live` call must complete first, and only a later, separate `--live --confirm` call executes.

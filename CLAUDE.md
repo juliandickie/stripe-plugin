@@ -18,6 +18,12 @@ The dispatcher is reflective; never add per-endpoint code. To track new Stripe e
 
 Safety classification is action-name plus the frozen DESTRUCTIVE override list in src/classify.js. Adding a money-mover means adding it there with a test.
 
+## Releasing
+
+A version lives in exactly two files, `.claude-plugin/plugin.json` and `package.json`, and they must match. Nothing else may hold a copy: `src/mcp_shim_server.js` reads the manifest, and `test/manifest.test.js` fails if a quoted version literal reappears or the two manifests diverge. Move the CHANGELOG's `## Unreleased` content under a `## <version> - <date>` heading in the same commit; a released version with no CHANGELOG section fails the same test file.
+
+Tag only after a bump. Version bumps, tags and deploys are separate, individually gated acts, and a tag without a bump is a meaningless ref.
+
 ## Validation
 
 node --test test/*.test.js and claude plugin validate . must both pass before any tag.

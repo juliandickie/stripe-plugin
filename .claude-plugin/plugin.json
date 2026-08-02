@@ -1,7 +1,7 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "stripe",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Full programmatic access to every Stripe API endpoint the pinned stripe-node SDK exposes, across many accounts. Multi-account (standalone keys and Connect), binary-enforced safety tier with live-mode arming, bundled Stripe CLI for webhooks. Proactively activates for: (1) any Stripe data lookup or operation, (2) cross-account Stripe reporting, (3) webhooks and CLI tasks.",
   "author": { "name": "Julian Dickie", "url": "https://github.com/juliandickie" },
   "homepage": "https://github.com/juliandickie/stripe-plugin",
