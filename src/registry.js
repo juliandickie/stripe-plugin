@@ -1,6 +1,7 @@
 'use strict';
 const fs = require('node:fs');
 const path = require('node:path');
+const {assertRefAcceptable} = require('./secrets');
 
 function resolveRegistryPath(opts, env) {
   if (opts && opts.flag) return opts.flag;
@@ -28,6 +29,23 @@ function loadRegistry(p) {
   }
   if (!reg || typeof reg.accounts !== 'object' || reg.accounts === null || Array.isArray(reg.accounts)) {
     throw new Error('Accounts registry must contain an "accounts" object.');
+  }
+  for (const name of Object.keys(reg.accounts)) {
+    const acct = reg.accounts[name];
+    if (!acct || typeof acct !== 'object') {
+      throw new Error('Account "' + name + '" must be an object.');
+    }
+    // Connect accounts carry no keys of their own; their platform is
+    // validated on its own pass through this loop.
+    if (acct.type === 'connect') continue;
+    if (acct.test_secret_key !== undefined) {
+      assertRefAcceptable(acct.test_secret_key,
+        {field: 'test_secret_key', account: name, live: false});
+    }
+    if (acct.live_secret_key !== undefined) {
+      assertRefAcceptable(acct.live_secret_key,
+        {field: 'live_secret_key', account: name, live: true});
+    }
   }
   return reg;
 }

@@ -46,3 +46,9 @@ test('stripe-money-ops is user-only and stripe-webhooks documents the bundled CL
   assert.match(wh.raw, /stripe listen|stripe trigger/);
   assert.match(wh.raw, /live/);
 });
+
+test('stripe-money-ops does not document the closed one-shot live sequence', () => {
+  const mo = fm(__dirname + '/../skills/stripe-money-ops/SKILL.md');
+  assert.doesNotMatch(mo.raw, /--live --arm-live --confirm/);
+  assert.match(mo.raw, /--arm-live/);
+});

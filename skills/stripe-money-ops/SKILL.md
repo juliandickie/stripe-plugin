@@ -8,15 +8,15 @@ allowed-tools: Bash Read
 
 # Stripe Money Operations
 
-These operations are irreversible. The engine classifies them destructive and will require an explicit confirmation preview, and in live mode prior `--arm-live`.
+These operations are irreversible. The engine classifies them destructive and will require an explicit confirmation preview, and in live mode prior `--arm-live` plus a vetting token (see step 3).
 
 ## Procedure
 
 1. State exactly what will happen: account, mode, amount, target id, irreversibility.
 
-2. Run without `--confirm` first and show the engine CONFIRMATION REQUIRED preview to the user verbatim.
+2. Run without `--confirm` first and show the engine CONFIRMATION REQUIRED preview to the user verbatim. This preview never resolves the secret, live or test, so it never costs a 1Password prompt.
 
-3. Only after explicit user approval in the same turn, re-run with `--confirm`. For live, the sequence is `--live --arm-live --confirm` and must be explicitly approved.
+3. Only after explicit user approval in the same turn, re-run with `--confirm`. For live, this is three separate calls inside Claude Code, each its own approval: arm with `--live --arm-live` first (it arms and exits, exit 14), preview with `--live` alone (step 2 above), then execute with `--live --confirm`. The PreToolUse guard issues the vetting token each of these needs automatically, so no separate vetting step is needed here. If a live call is ever refused with exit 15, it carried no vetting token for that exact operation, because no permission gate parsed it as this engine (most likely an unusual shell construct); the fix is to run the plain operation again, not to retry the same unrecognised form. Working directly in a terminal with no guard active, re-running the same command changes nothing; run `stripe-x vet <resource> <action> --live` first, naming the same account, target id and registry as the call it authorises, and adding `--arm-live` to vet the arming step. It needs a real terminal.
 
 4. Never batch. For multiple targets use `--bulk-ids` and relay the scope review; proceed only with `--confirm-bulk` after approval.
 
@@ -24,3 +24,4 @@ These operations are irreversible. The engine classifies them destructive and wi
 
 Refund a charge (test): `stripe-x refunds create --account idd --data charge=ch_123 --confirm`
 Cancel a subscription (test): `stripe-x subscriptions cancel --id sub_123 --account idd --confirm`
+Refund a charge (live, three calls): `stripe-x refunds create --account idd --live --arm-live` then show the preview with `--live`, then `--live --confirm`.

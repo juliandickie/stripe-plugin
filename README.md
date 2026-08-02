@@ -13,11 +13,25 @@ Then run `/stripe:stripe-setup` to create the accounts registry and provision th
 
 ## Accounts
 
-Accounts live in a JSON registry (default `${CLAUDE_PLUGIN_DATA}/stripe-x/accounts.json`, `chmod 600`, gitignored). Each entry is `standalone` (its own test and live keys) or `connect` (a platform profile plus a connected account id). Live keys should use `env:VAR_NAME` indirection.
+Accounts live in a JSON registry (default `${CLAUDE_PLUGIN_DATA}/stripe-x/accounts.json`, `chmod 600`, gitignored). Each entry is `standalone` (its own test and live keys) or `connect` (a platform profile plus a connected account id). Keys are references, never plaintext: test keys may use `env:VAR_NAME` indirection; live keys must be a 1Password reference (`op://Vault/Item/field`).
+
+## Credentials
+
+Secret-bearing fields hold a reference, never a value. `op://Vault/Item/field` resolves through the 1Password CLI and is accepted for both `test_secret_key` and `live_secret_key`; `env:NAME` reads a process environment variable and is accepted for `test_secret_key` only. Anything else, including a raw `sk_live_...` or `sk_test_...` key, is refused at registry load. A Connect account carries no keys of its own; both fields, plus `op_account`, are read from the `platform` account it names.
+
+1Password resolution needs the `op` CLI installed and the app unlocked. When more than one 1Password account is signed in, set `op_account` on the registry entry to the sign-in address `op` should use, or `op read` fails with "multiple accounts found". `/stripe:stripe-setup` walks through this and scaffolds a starter registry.
 
 ## Safety
 
-Three classes enforced inside the engine binary: reads run immediately; mutating and destructive operations print a confirmation preview and do not call Stripe without `--confirm`; destructive ones state irreversibility. Test mode is default; live writes need `--live` and a per-session `--arm-live` (live-mode arming). Bulk writes over the threshold return a scope review. Multi-account fan-out is read-only.
+Three classes enforced inside the engine binary: reads run immediately; mutating and destructive operations print a confirmation preview and do not call Stripe without `--confirm`; destructive ones state irreversibility. Test mode is default; live writes need `--live`. `--arm-live` (live-mode arming) is its own call: it arms the session for one account and exits without executing (exit code 14), so execution always needs a separate, later `--live --confirm` call. Bulk writes over the threshold return a scope review. Multi-account fan-out is read-only.
+
+The engine enforces all of the above, but it cannot defend against a caller that writes its own flags. A `PreToolUse` hook is a required second layer that reads the harness permission mode and denies or escalates stripe-x calls Claude Code would otherwise run unattended (see Security below).
+
+Live mutating and destructive operations, live arming, and live calls through the `stripe-x cli` bridge all require a vetting token, proof that a permission gate saw that specific call, on top of arming. Inside Claude Code the `PreToolUse` guard issues one automatically, so this needs no separate step. Working directly in a terminal, run `stripe-x vet <resource> <action> --live` first, naming the same account, target id and registry as the call it authorises; it requires a real terminal (a TTY) and refuses otherwise. A live call carrying no token for that operation is refused, exit code 15.
+
+The token is bound to the call, not to the session. It is filed under a canonical key covering the account, resource, action, live flag, arm flag, target id and registry path, which the guard and the engine compute independently, so a token for `customers list` cannot authorise `refunds create --live`, an arming token cannot authorise the execution it armed for, and a token approved for one customer id cannot delete another. An invocation assembled at runtime that no text classifier can recognise produces no token at all, and is therefore refused rather than allowed.
+
+Two limits worth stating plainly. The target is bound through `--id` and `--bulk-ids` but not through `--data`, so for an operation whose target lives in `--data` (`refunds create --data charge=ch_1`) a warm token still authorises the same operation against a different charge until it expires. The TTY requirement on `stripe-x vet` is a presence heuristic, not proof of a human, and tools such as `script` and `expect` defeat it.
 
 ## What you get
 
@@ -33,4 +47,4 @@ stripe-node 22.1.1, Stripe API 2026-04-22.dahlia, Stripe CLI pinned in scripts/s
 
 ## Security
 
-No secrets in the repo. Hooks: a single SessionStart hook installs the npm dependency and provisions the Stripe CLI. Review before installing.
+No secrets in the repo. Two hooks: `SessionStart` installs the npm dependency and provisions the Stripe CLI; `PreToolUse` gates stripe-x Bash calls (see Safety above) whenever Claude Code is in a permission mode that would not otherwise prompt - `auto`, `dontAsk`, `bypassPermissions`, or any unrecognised mode. Review before installing.
