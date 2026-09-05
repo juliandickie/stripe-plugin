@@ -39,7 +39,7 @@ Skills: stripe-setup (user-only), stripe-api, stripe-accounts, stripe-multi-acco
 
 ## Pinned versions
 
-stripe-node 22.1.1, Stripe API 2026-04-22.dahlia, Stripe CLI pinned in scripts/stripe-cli-version.txt.
+stripe-node 22.6.1, Stripe API 2026-08-26.dahlia, Stripe CLI pinned in scripts/stripe-cli-version.txt.
 
 ## Testing
 

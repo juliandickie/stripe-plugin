@@ -4,9 +4,15 @@
   "private": true,
   "description": "Engine for the stripe Claude Code plugin",
   "license": "MIT",
-  "bin": { "stripe-x": "bin/stripe-x" },
-  "engines": { "node": ">=18" },
-  "dependencies": { "stripe": "22.1.1" },
+  "bin": {
+    "stripe-x": "bin/stripe-x"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "stripe": "22.6.1"
+  },
   "scripts": {
     "test": "node --test test/*.test.js",
     "gen-api-map": "node scripts/gen-api-map.js"

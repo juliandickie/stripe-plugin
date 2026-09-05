@@ -4,6 +4,8 @@ All notable changes to the stripe plugin are recorded here.
 
 ## Unreleased
 
+- Bumped the pinned stripe-node SDK from 22.1.1 to 22.6.1. Pinned Stripe API version moves from 2026-04-22.dahlia to 2026-08-26.dahlia. Regenerated the API map: 715 operations (was 703), 12 added, none removed or changed. New: `accounts.unreject`, `billing.feedbackOptions.*` (create, deactivate, list, retrieve, update), `paymentRecords.list`, `v2.commerce.productCatalog.imports.*` (create, list, retrieve). Arity re-probe found no shape changes; the only sub-3 instance-style ops are the known singletons (balance, balanceSettings, tax.settings, accounts.retrieveCurrent, billing.creditBalanceSummaries, apps.secrets.deleteWhere) and the only 3-arity collection ops are nested under a parent id (v2.core.accounts.persons and personTokens), both as before. Upstream notes worth knowing: 22.6.1 hardens multipart upload boundaries and URL handling; 22.6.0 throws on a discriminated-union V2 param with a missing discriminator instead of silently skipping coercion, and throws a connection error when the server drops mid-response instead of hanging.
+
 ## 0.2.0 - 2026-08-02
 
 Credential and permission hardening. Answers an external security question from 2026-07-29 about what enforces the boundary between an agent's decision and execution of a destructive Stripe call. Four breaking changes, all listed below.
