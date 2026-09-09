@@ -13,19 +13,19 @@ function ev(command, permission_mode, overrides) {
   }, overrides || {});
 }
 
-test('non-Bash and non-PreToolUse events defer', () => {
-  assert.equal(decide(ev('stripe-x refunds create --live', 'auto', {tool_name: 'Read'})).permissionDecision, 'defer');
-  assert.equal(decide(ev('stripe-x refunds create --live', 'auto', {hook_event_name: 'PostToolUse'})).permissionDecision, 'defer');
+test('non-Bash and non-PreToolUse events get no opinion', () => {
+  assert.equal(decide(ev('stripe-x refunds create --live', 'auto', {tool_name: 'Read'})).permissionDecision, undefined);
+  assert.equal(decide(ev('stripe-x refunds create --live', 'auto', {hook_event_name: 'PostToolUse'})).permissionDecision, undefined);
 });
 
-test('commands that do not mention the engine defer', () => {
-  assert.equal(decide(ev('ls -la', 'auto')).permissionDecision, 'defer');
-  assert.equal(decide(ev('git status', 'bypassPermissions')).permissionDecision, 'defer');
+test('commands that do not mention the engine get no opinion', () => {
+  assert.equal(decide(ev('ls -la', 'auto')).permissionDecision, undefined);
+  assert.equal(decide(ev('git status', 'bypassPermissions')).permissionDecision, undefined);
 });
 
-test('prompting modes always defer, even for live', () => {
+test('prompting modes always get no opinion, even for live', () => {
   for (const m of ['default', 'plan', 'acceptEdits']) {
-    assert.equal(decide(ev('stripe-x refunds create --live --confirm', m)).permissionDecision, 'defer', m);
+    assert.equal(decide(ev('stripe-x refunds create --live --confirm', m)).permissionDecision, undefined, m);
   }
 });
 
@@ -45,13 +45,13 @@ test('a test-mode write asks in a non-prompting mode', () => {
   assert.equal(decide(ev('stripe-x customers del --id cus_1 --confirm', 'auto')).permissionDecision, 'ask');
 });
 
-test('a read defers even in a non-prompting mode', () => {
-  assert.equal(decide(ev('stripe-x customers list --account idd', 'auto')).permissionDecision, 'defer');
-  assert.equal(decide(ev('stripe-x charges retrieve --id ch_1', 'auto')).permissionDecision, 'defer');
+test('a read gets no opinion even in a non-prompting mode', () => {
+  assert.equal(decide(ev('stripe-x customers list --account idd', 'auto')).permissionDecision, undefined);
+  assert.equal(decide(ev('stripe-x charges retrieve --id ch_1', 'auto')).permissionDecision, undefined);
 });
 
-test('help is read-only and defers', () => {
-  assert.equal(decide(ev('stripe-x help customers', 'auto')).permissionDecision, 'defer');
+test('help is read-only and gets no opinion', () => {
+  assert.equal(decide(ev('stripe-x help customers', 'auto')).permissionDecision, undefined);
 });
 
 test('the cli bridge is treated as at least mutating', () => {
@@ -129,7 +129,7 @@ test('a substring engine mention with no live flag genuinely reaches the unlocat
 
 test('a value-taking flag does not shift the positional parse', () => {
   // --account takes a value; "idd" must not be mistaken for the action.
-  assert.equal(decide(ev('stripe-x --account idd customers list', 'auto')).permissionDecision, 'defer');
+  assert.equal(decide(ev('stripe-x --account idd customers list', 'auto')).permissionDecision, undefined);
 });
 
 test('a missing action asks rather than throwing', () => {
@@ -143,8 +143,8 @@ test('the reason never echoes the command', () => {
 });
 
 test('malformed input defers rather than blocking every Bash call', () => {
-  assert.equal(decide(null).permissionDecision, 'defer');
-  assert.equal(decide({}).permissionDecision, 'defer');
+  assert.equal(decide(null).permissionDecision, undefined);
+  assert.equal(decide({}).permissionDecision, undefined);
 });
 
 test('quote splicing inside a token cannot smuggle a live call', () => {
@@ -173,9 +173,9 @@ test('a nested shell with a spliced live flag is still denied', () => {
 });
 
 test('defer is reachable only for a provably simple read', () => {
-  assert.equal(decide(ev('stripe-x customers list --account idd', 'auto')).permissionDecision, 'defer');
-  assert.equal(decide(ev('stripe-x --account idd customers list', 'auto')).permissionDecision, 'defer');
-  assert.equal(decide(ev('stripe-x help customers', 'auto')).permissionDecision, 'defer');
+  assert.equal(decide(ev('stripe-x customers list --account idd', 'auto')).permissionDecision, undefined);
+  assert.equal(decide(ev('stripe-x --account idd customers list', 'auto')).permissionDecision, undefined);
+  assert.equal(decide(ev('stripe-x help customers', 'auto')).permissionDecision, undefined);
   // Same read, but quoted, so simplicity cannot be proven - and unprovable
   // simplicity on a command that mentions the engine now denies, not defers.
   assert.equal(decide(ev('"stripe-x" customers list', 'auto')).permissionDecision, 'deny');
@@ -205,9 +205,9 @@ test('an unrecognised hyphen token is not silently skipped', () => {
 });
 
 test('the single-read defer path still works with real flags', () => {
-  assert.equal(decide(ev('stripe-x charges retrieve --id ch_1 --expand data', 'auto')).permissionDecision, 'defer');
-  assert.equal(decide(ev('stripe-x paymentIntents list --limit 5', 'auto')).permissionDecision, 'defer');
-  assert.equal(decide(ev('stripe-x customers list --account idd --table', 'auto')).permissionDecision, 'defer');
+  assert.equal(decide(ev('stripe-x charges retrieve --id ch_1 --expand data', 'auto')).permissionDecision, undefined);
+  assert.equal(decide(ev('stripe-x paymentIntents list --limit 5', 'auto')).permissionDecision, undefined);
+  assert.equal(decide(ev('stripe-x customers list --account idd --table', 'auto')).permissionDecision, undefined);
 });
 
 test('shell redirection cannot shift a destructive call into the read slots', () => {
@@ -249,7 +249,7 @@ test('genuine reads with real flags still defer', () => {
     'stripe-x customers list --data email=a@b.co',
     'stripe-x help customers'
   ]) {
-    assert.equal(decide(ev(c, 'auto')).permissionDecision, 'defer', c);
+    assert.equal(decide(ev(c, 'auto')).permissionDecision, undefined, c);
   }
 });
 
@@ -302,11 +302,13 @@ test('the hook process entry point emits a valid decision on stdin', () => {
   assert.equal(parsed.hookSpecificOutput.permissionDecision, 'deny');
 });
 
-test('the hook process entry point defers on malformed stdin', () => {
+test('the hook process entry point emits an empty decision on malformed stdin', () => {
   const {execFileSync} = require('node:child_process');
   const out = execFileSync('node', [__dirname + '/../hooks/pretooluse-stripe-guard.js'],
     {input: 'not json', encoding: 'utf8', env: {PATH: process.env.PATH}});
-  assert.equal(JSON.parse(out).hookSpecificOutput.permissionDecision, 'defer');
+  // No opinion is emitted as an empty object, never as a decision value.
+  // Claude Code 2.1.260 treats the string 'defer' as a real deferral.
+  assert.deepEqual(JSON.parse(out), {});
 });
 
 // --- Vetting token issuance ---
@@ -356,7 +358,7 @@ const LIVE_REFUND_CMD = 'stripe-x refunds create --live --confirm --account idd'
 test('a non-Bash event mentioning the engine issues no token', () => {
   const env = {CLAUDE_PLUGIN_DATA: dataDir(), CLAUDE_SESSION_ID: 's'};
   const d = decide(ev(LIVE_REFUND_CMD, 'auto', {tool_name: 'Read'}), env);
-  assert.equal(d.permissionDecision, 'defer');
+  assert.equal(d.permissionDecision, undefined);
   assert.equal(isVetted(env, LIVE_REFUND), false);
 });
 
@@ -372,7 +374,7 @@ test('a read issues NO token, so routine traffic cannot keep one warm', () => {
   // session-wide token, and an obfuscated live call could then ride it.
   const env = {CLAUDE_PLUGIN_DATA: dataDir(), CLAUDE_SESSION_ID: 's'};
   const d = decide(ev('stripe-x customers list --account idd', 'auto'), env);
-  assert.equal(d.permissionDecision, 'defer');
+  assert.equal(d.permissionDecision, undefined);
   assert.equal(isVetted(env, canonicalKey({account: 'idd', resource: 'customers', action: 'list', live: true})), false);
   assert.equal(isVetted(env, LIVE_REFUND), false);
   assert.equal(fs.readdirSync(env.CLAUDE_PLUGIN_DATA).length, 0, 'nothing written at all');
@@ -389,7 +391,7 @@ test('a test-mode write issues no token, because the engine never gates one', ()
 test('a prompting-mode defer on a live op issues a token bound to that op', () => {
   const env = {CLAUDE_PLUGIN_DATA: dataDir(), CLAUDE_SESSION_ID: 's'};
   const d = decide(ev(LIVE_REFUND_CMD, 'default'), env);
-  assert.equal(d.permissionDecision, 'defer');
+  assert.equal(d.permissionDecision, undefined);
   assert.equal(isVetted(env, LIVE_REFUND), true);
   // The binding, asserted from the guard's own side: this token authorises
   // that refund and nothing else.
@@ -401,7 +403,7 @@ test('a prompting-mode defer on a live op issues a token bound to that op', () =
 test('a prompting-mode defer on a live arm issues an arm token only', () => {
   const env = {CLAUDE_PLUGIN_DATA: dataDir(), CLAUDE_SESSION_ID: 's'};
   const d = decide(ev('stripe-x refunds create --live --arm-live --account idd', 'default'), env);
-  assert.equal(d.permissionDecision, 'defer');
+  assert.equal(d.permissionDecision, undefined);
   assert.equal(isVetted(env, canonicalKey({account: 'idd', resource: 'refunds', action: 'create', live: true, arm: true})), true);
   assert.equal(isVetted(env, LIVE_REFUND), false, 'arming a live op must not authorise executing it');
 });
@@ -424,14 +426,14 @@ test('a live op the guard cannot prove simple mints nothing', () => {
 test('a command that never mentions the engine issues no token', () => {
   const env = {CLAUDE_PLUGIN_DATA: dataDir(), CLAUDE_SESSION_ID: 's'};
   const d = decide(ev('ls -la', 'auto'), env);
-  assert.equal(d.permissionDecision, 'defer');
+  assert.equal(d.permissionDecision, undefined);
   assert.equal(isVetted(env, LIVE_REFUND), false);
 });
 
 test('issuance is skipped when CLAUDE_PLUGIN_DATA is absent', () => {
   const env = {CLAUDE_SESSION_ID: 's'};
   const d = decide(ev(LIVE_REFUND_CMD, 'default'), env);
-  assert.equal(d.permissionDecision, 'defer');
+  assert.equal(d.permissionDecision, undefined);
   assert.equal(isVetted(env, LIVE_REFUND), false);
 });
 
@@ -443,7 +445,7 @@ test('a failure to write a token does not change or throw past the decision', ()
   fs.writeFileSync(path.join(dir, 'stripe-x'), 'not a directory');
   const env = {CLAUDE_PLUGIN_DATA: dir, CLAUDE_SESSION_ID: 's'};
   const d = decide(ev(LIVE_REFUND_CMD, 'default'), env);
-  assert.equal(d.permissionDecision, 'defer');
+  assert.equal(d.permissionDecision, undefined);
   assert.equal(isVetted(env, LIVE_REFUND), false);
 });
 

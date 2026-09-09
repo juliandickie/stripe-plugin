@@ -10,8 +10,9 @@
 //
 // THE INVARIANT
 //
-//   `defer` must be EARNED by proving the command is a SINGLE, SIMPLE,
-//   read-only engine invocation.
+//   An EMPTY decision (no opinion, so Claude Code's own permission flow
+//   decides) must be EARNED by proving the command is a SINGLE, SIMPLE,
+//   read-only engine invocation. The helper is still called defer().
 //   Anything whose reduced text looks live -> deny.
 //   Anything that cannot be proven simple  -> ask.
 //
@@ -73,8 +74,19 @@ const SIMPLE_CHARS = /^[A-Za-z0-9 _\-./,=:@+]*$/;
 // classify() only inspects the action.
 const IDENTIFIER = /^[A-Za-z][A-Za-z0-9_.]*$/;
 
+// No opinion. Emit NO permissionDecision at all, so Claude Code's normal
+// permission flow decides (a prompt in prompting modes, the classifier in
+// auto mode, straight through in bypass mode).
+//
+// This used to return the literal value 'defer'. Claude Code 2.1.260 began
+// honouring 'defer' as "park this tool call in the user's deferred-tool
+// queue for a later decision", which in auto and bypass modes never resolves,
+// so EVERY non-Stripe Bash command in every session hung with no result
+// (2026-09-10, found in a Claude Code Desktop session; transcript showed a
+// hook_deferred_tool attachment and no tool_result for each Bash call).
+// The name is kept so the classifier above reads unchanged.
 function defer() {
-  return {permissionDecision: 'defer'};
+  return {};
 }
 
 function deny(reason) {
@@ -333,9 +345,14 @@ function decide(input, env) {
 }
 
 function emit(d) {
-  process.stdout.write(JSON.stringify({
-    hookSpecificOutput: Object.assign({hookEventName: 'PreToolUse'}, d)
-  }));
+  // An empty decision is emitted as an empty object, which the hook contract
+  // reads as "this hook has nothing to say". Wrapping it in hookSpecificOutput
+  // with no permissionDecision would also be tolerated, but an empty object is
+  // the documented no-op and cannot be misread by a future version.
+  const out = Object.keys(d).length === 0
+    ? {}
+    : {hookSpecificOutput: Object.assign({hookEventName: 'PreToolUse'}, d)};
+  process.stdout.write(JSON.stringify(out));
 }
 
 if (require.main === module) {
