@@ -2,7 +2,7 @@
 
 All notable changes to the stripe plugin are recorded here.
 
-## Unreleased
+## 0.2.1 - 2026-09-10
 
 - Fixed - the PreToolUse guard no longer emits `permissionDecision: "defer"` for commands it has no opinion on (everything that does not invoke stripe-x, plus prompting modes and proven simple reads). Claude Code 2.1.260 started honouring the literal value `defer` as "park this tool call in the user's deferred-tool queue", which in auto and bypassPermissions modes never resolves, so every non-Stripe Bash command in every Claude Code session hung with no result (found 2026-09-10). The guard now emits an empty object `{}` for no opinion, the documented hook no-op. Deny and ask are unchanged. Anyone running 0.2.0 on Claude Code 2.1.260 or later needs this fix.
 
