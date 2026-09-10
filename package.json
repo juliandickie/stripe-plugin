@@ -1,6 +1,6 @@
 {
   "name": "stripe-x-engine",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "description": "Engine for the stripe Claude Code plugin",
   "license": "MIT",
