@@ -11,7 +11,7 @@
     "node": ">=18"
   },
   "dependencies": {
-    "stripe": "22.6.1"
+    "stripe": "22.6.2"
   },
   "scripts": {
     "test": "node --test test/*.test.js",
