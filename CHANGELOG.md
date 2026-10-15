@@ -2,6 +2,13 @@
 
 All notable changes to the stripe plugin are recorded here.
 
+## Unreleased
+
+- Breaking - bumped the pinned stripe-node SDK from 22.6.2 to 23.0.0. The pinned Stripe API version moves from 2026-08-26.dahlia to 2026-09-30.endive, and because the dispatcher is reflective every call now goes out on endive unless `--api-version` overrides it. Endive removes `payment_method_types` from Checkout Sessions, PaymentIntents, SetupIntents and Elements, deprecates the payment request button, and enforces billing address collection for non-EEA SEPA Direct Debit. Pass `--api-version 2026-08-26.dahlia` for a call that still needs the old behaviour.
+- Breaking - the engine now needs Node.js 20 or later (`engines.node` was `>=18`), because stripe-node 23 drops Node 18.
+- Regenerated the API map: 737 operations (was 715), 22 added, none removed or changed. New: `apps.installs.*` (create, list, retrieve, update, uninstall), `productCatalog.trialOffers.*` (create, list, retrieve, update), `subscriptions.pause`, `tax.locations.*` (create, list, retrieve), `threeDSecure.authentications.*` (create, list, retrieve, cancel, submit), plus their `initialize` helpers. All classify as mutating by the default rule; none is added to the destructive list. Arity re-probe found every new instance op at 3 and every new collection op at 2; the only exceptions on the whole surface remain the known singletons (balanceSettings.update, tax.settings.update) and the parent-scoped creates (v2.core.accounts.persons and personTokens).
+- Upstream notes worth knowing: incomplete response bodies now throw `StripeConnectionError` instead of `StripeAPIError`; `webhooks.signature.verifyHeader` now applies the default timestamp tolerance when none is given; `Stripe.constructEventWithoutVerification` and the `ErrorType` export are removed (the engine uses neither).
+
 ## 0.2.1 - 2026-09-10
 
 - Fixed - the PreToolUse guard no longer emits `permissionDecision: "defer"` for commands it has no opinion on (everything that does not invoke stripe-x, plus prompting modes and proven simple reads). Claude Code 2.1.260 started honouring the literal value `defer` as "park this tool call in the user's deferred-tool queue", which in auto and bypassPermissions modes never resolves, so every non-Stripe Bash command in every Claude Code session hung with no result (found 2026-09-10). The guard now emits an empty object `{}` for no opinion, the documented hook no-op. Deny and ask are unchanged. Anyone running 0.2.0 on Claude Code 2.1.260 or later needs this fix.
