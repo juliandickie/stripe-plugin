@@ -6,5 +6,5 @@ test('package declares name, bin, and node engine', () => {
   assert.equal(pkg.name, 'stripe-x-engine');
   assert.equal(pkg.bin['stripe-x'], 'bin/stripe-x');
   assert.match(pkg.engines.node, />=20/);
-  assert.equal(pkg.dependencies.stripe, '23.0.0');
+  assert.equal(pkg.dependencies.stripe, '23.0.1');
 });

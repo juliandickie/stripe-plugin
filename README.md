@@ -39,7 +39,7 @@ Skills: stripe-setup (user-only), stripe-api, stripe-accounts, stripe-multi-acco
 
 ## Pinned versions
 
-stripe-node 23.0.0, Stripe API 2026-09-30.endive, Node 20 or later, Stripe CLI pinned in scripts/stripe-cli-version.txt.
+stripe-node 23.0.1, Stripe API 2026-09-30.endive, Node 20 or later, Stripe CLI pinned in scripts/stripe-cli-version.txt.
 
 ## Testing
 

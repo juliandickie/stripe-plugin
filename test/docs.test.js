@@ -4,7 +4,7 @@ const fs = require('node:fs');
 
 test('README covers install, accounts, safety, and the pinned versions', () => {
   const r = fs.readFileSync(__dirname + '/../README.md', 'utf8');
-  for (const s of ['/plugin marketplace add', 'accounts.json', 'live-mode arming', 'stripe-node', '23.0.0']) {
+  for (const s of ['/plugin marketplace add', 'accounts.json', 'live-mode arming', 'stripe-node', '23.0.1']) {
     assert.ok(r.includes(s), 'README missing: ' + s);
   }
 });
